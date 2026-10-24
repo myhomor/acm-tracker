@@ -1,0 +1,38 @@
+name: acm-tracker
+
+services:
+  data-perms:
+    image: alpine:3.20
+    user: "0:0"
+    command: ["chown", "${ACM_UID:-1000}:${ACM_GID:-1000}", "/data"]
+    volumes:
+      - ${ACM_DATA_DIR:-./data}:/data
+    restart: "no"
+
+  acm:
+    build:
+      context: ./acm-tracker
+      dockerfile: Dockerfile
+    image: acm-tracker:local
+    container_name: acm-tracker
+    restart: unless-stopped
+    user: "${ACM_UID:-1000}:${ACM_GID:-1000}"
+    environment:
+      API_PORT: ${ACM_PORT:-5188}
+      TZ: ${ACM_TZ:-Europe/Moscow}
+      OWNER_NAME: ${OWNER_NAME:-Harry G.}
+      OWNER_EMAIL: ${OWNER_EMAIL:-owner@acm.local}
+      OWNER_RATE_PER_HOUR: ${OWNER_RATE_PER_HOUR:-0}
+    ports:
+      - "127.0.0.1:${ACM_PORT:-5188}:${ACM_PORT:-5188}"
+    depends_on:
+      data-perms:
+        condition: service_completed_successfully
+    volumes:
+      - ${ACM_DATA_DIR:-./data}:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.API_PORT+'/api/projects').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 5

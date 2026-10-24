@@ -1,0 +1,1543 @@
+diff --git a/apps/api/prisma/migrations/20261024120000_add_task_summary/migration.sql b/apps/api/prisma/migrations/20261024120000_add_task_summary/migration.sql
+new file mode 100644
+index 0000000..62ecb44
+--- /dev/null
++++ b/apps/api/prisma/migrations/20261024120000_add_task_summary/migration.sql
+@@ -0,0 +1,2 @@
++-- AlterTable
++ALTER TABLE "Task" ADD COLUMN     "summary" TEXT;
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index f1b4bc3..8a60438 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -38,6 +38,7 @@ model Task {
+   code            String
+   title           String
+   phase           String?
++  summary         String?
+   status          String         @default("todo")
+   estimateMinutes Int?
+   createdAt       DateTime       @default(now())
+diff --git a/apps/api/prisma/sqlite/migrations/20261024120000_add_task_summary/migration.sql b/apps/api/prisma/sqlite/migrations/20261024120000_add_task_summary/migration.sql
+new file mode 100644
+index 0000000..ff93f01
+--- /dev/null
++++ b/apps/api/prisma/sqlite/migrations/20261024120000_add_task_summary/migration.sql
+@@ -0,0 +1,2 @@
++-- AlterTable
++ALTER TABLE "Task" ADD COLUMN "summary" TEXT;
+diff --git a/apps/api/prisma/sqlite/schema.prisma b/apps/api/prisma/sqlite/schema.prisma
+index a4b96af..69e9f63 100644
+--- a/apps/api/prisma/sqlite/schema.prisma
++++ b/apps/api/prisma/sqlite/schema.prisma
+@@ -39,6 +39,7 @@ model Task {
+   code            String
+   title           String
+   phase           String?
++  summary         String?
+   status          String         @default("todo")
+   estimateMinutes Int?
+   createdAt       DateTime       @default(now())
+diff --git a/apps/api/src/modules/mcp/infrastructure/persistence/prisma-mcp-ingest.adapter.ts b/apps/api/src/modules/mcp/infrastructure/persistence/prisma-mcp-ingest.adapter.ts
+index 4be07b8..64405d3 100644
+--- a/apps/api/src/modules/mcp/infrastructure/persistence/prisma-mcp-ingest.adapter.ts
++++ b/apps/api/src/modules/mcp/infrastructure/persistence/prisma-mcp-ingest.adapter.ts
+@@ -1,5 +1,6 @@
+ import { Injectable } from "@nestjs/common";
+ import type { ModelPrice } from "@acm/shared";
++import { localHourMinute } from "@acm/shared";
+ import { PrismaService } from "../../../../prisma/prisma.service";
+ import { McpIngestPort, McpReportView, RecordWorkInput } from "../../domain/ports/mcp-ingest.port";
+ 
+@@ -67,7 +68,7 @@ export class PrismaMcpIngestAdapter implements McpIngestPort {
+         : "sin IA";
+       return {
+         id: r.id,
+-        time: r.startedAt.toISOString().slice(11, 16),
++        time: localHourMinute(r.startedAt),
+         agent: r.aiRuns[0]?.agent ?? null,
+         person: r.member.name,
+         task: `${r.task.code} · ${r.task.title}`,
+diff --git a/apps/api/src/modules/projects/infrastructure/persistence/project.mapper.ts b/apps/api/src/modules/projects/infrastructure/persistence/project.mapper.ts
+index fce82f0..4574272 100644
+--- a/apps/api/src/modules/projects/infrastructure/persistence/project.mapper.ts
++++ b/apps/api/src/modules/projects/infrastructure/persistence/project.mapper.ts
+@@ -8,6 +8,7 @@ export function toDomainTask(row: PrismaTask): Task {
+     code: row.code,
+     title: row.title,
+     phase: row.phase,
++    summary: row.summary,
+     status: row.status as Task["status"],
+     estimateMinutes: row.estimateMinutes,
+     createdAt: row.createdAt.toISOString(),
+diff --git a/apps/api/src/modules/reporting/application/use-cases/cost-by-person.use-case.spec.ts b/apps/api/src/modules/reporting/application/use-cases/cost-by-person.use-case.spec.ts
+index 95b343e..d7ff564 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/cost-by-person.use-case.spec.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/cost-by-person.use-case.spec.ts
+@@ -8,11 +8,12 @@ import {
+   TeamTodayRow,
+   TodaySummary,
+ } from "../../domain/ports/cost-aggregation.port";
++import type { DailyEntryRow } from "../../domain/daily-report";
+ 
+ class FakeAgg implements CostAggregationPort {
+   public lastProjectId: string | undefined = undefined;
+-  async projectHumanCost(): Promise<ProjectCostRow> {
+-    return { human: 0, minutes: 0 };
++  async projectCost(): Promise<ProjectCostRow> {
++    return { human: 0, ai: 0, minutes: 0 };
+   }
+   async projectEstimate(): Promise<ProjectEstimateRow> {
+     return { estimateHours: null, ratePerHour: null };
+@@ -21,7 +22,10 @@ class FakeAgg implements CostAggregationPort {
+     this.lastProjectId = projectId;
+     return [{ memberId: "m1", name: "Ada", minutes: 60, human: 50, ai: 0, total: 50 }];
+   }
+-  async weeklyHumanCost(): Promise<WeeklyCost[]> {
++  async weeklyCost(): Promise<WeeklyCost[]> {
++    return [];
++  }
++  async dailyEntries(): Promise<DailyEntryRow[]> {
+     return [];
+   }
+   async todaySummary(): Promise<TodaySummary> {
+diff --git a/apps/api/src/modules/reporting/application/use-cases/daily-report.use-case.ts b/apps/api/src/modules/reporting/application/use-cases/daily-report.use-case.ts
+new file mode 100644
+index 0000000..bd56f4c
+--- /dev/null
++++ b/apps/api/src/modules/reporting/application/use-cases/daily-report.use-case.ts
+@@ -0,0 +1,13 @@
++import { Inject, Injectable } from "@nestjs/common";
++import type { DailyReport } from "@acm/shared";
++import { COST_AGGREGATION, CostAggregationPort } from "../../domain/ports/cost-aggregation.port";
++import { groupByDay } from "../../domain/daily-report";
++
++@Injectable()
++export class DailyReportUseCase {
++  constructor(@Inject(COST_AGGREGATION) private readonly agg: CostAggregationPort) {}
++
++  async execute(from: Date, projectId?: string): Promise<DailyReport[]> {
++    return groupByDay(await this.agg.dailyEntries(from, projectId));
++  }
++}
+diff --git a/apps/api/src/modules/reporting/application/use-cases/margin-summary.use-case.spec.ts b/apps/api/src/modules/reporting/application/use-cases/margin-summary.use-case.spec.ts
+index e5828e7..98e5ed3 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/margin-summary.use-case.spec.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/margin-summary.use-case.spec.ts
+@@ -8,10 +8,11 @@ import {
+   TeamTodayRow,
+   TodaySummary,
+ } from "../../domain/ports/cost-aggregation.port";
++import type { DailyEntryRow } from "../../domain/daily-report";
+ 
+ class FakeAgg implements CostAggregationPort {
+-  async projectHumanCost(): Promise<ProjectCostRow> {
+-    return { human: 0, minutes: 0 };
++  async projectCost(): Promise<ProjectCostRow> {
++    return { human: 0, ai: 0, minutes: 0 };
+   }
+   async projectEstimate(): Promise<ProjectEstimateRow> {
+     return { estimateHours: null, ratePerHour: null };
+@@ -19,7 +20,10 @@ class FakeAgg implements CostAggregationPort {
+   async costByPerson(): Promise<PersonCost[]> {
+     return [];
+   }
+-  async weeklyHumanCost(): Promise<WeeklyCost[]> {
++  async weeklyCost(): Promise<WeeklyCost[]> {
++    return [];
++  }
++  async dailyEntries(): Promise<DailyEntryRow[]> {
+     return [];
+   }
+   async todaySummary(): Promise<TodaySummary> {
+diff --git a/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.spec.ts b/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.spec.ts
+index d155759..6310f0e 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.spec.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.spec.ts
+@@ -8,13 +8,14 @@ import {
+   TeamTodayRow,
+   TodaySummary,
+ } from "../../domain/ports/cost-aggregation.port";
++import type { DailyEntryRow } from "../../domain/daily-report";
+ 
+ class FakeAgg implements CostAggregationPort {
+   constructor(
+     private readonly row: ProjectCostRow,
+     private readonly estimate: ProjectEstimateRow = { estimateHours: null, ratePerHour: null },
+   ) {}
+-  async projectHumanCost(): Promise<ProjectCostRow> {
++  async projectCost(): Promise<ProjectCostRow> {
+     return this.row;
+   }
+   async projectEstimate(): Promise<ProjectEstimateRow> {
+@@ -23,7 +24,10 @@ class FakeAgg implements CostAggregationPort {
+   async costByPerson(): Promise<PersonCost[]> {
+     return [];
+   }
+-  async weeklyHumanCost(): Promise<WeeklyCost[]> {
++  async weeklyCost(): Promise<WeeklyCost[]> {
++    return [];
++  }
++  async dailyEntries(): Promise<DailyEntryRow[]> {
+     return [];
+   }
+   async todaySummary(): Promise<TodaySummary> {
+@@ -39,7 +43,7 @@ class FakeAgg implements CostAggregationPort {
+ 
+ describe("ProjectCostBreakdownUseCase", () => {
+   it("returns nulls for estimate and margin when the project has no rate", async () => {
+-    const useCase = new ProjectCostBreakdownUseCase(new FakeAgg({ human: 1508, minutes: 2010 }));
++    const useCase = new ProjectCostBreakdownUseCase(new FakeAgg({ human: 1508, ai: 0, minutes: 2010 }));
+     const result = await useCase.execute("p1");
+     expect(result).toEqual({
+       human: 1508,
+@@ -55,9 +59,9 @@ describe("ProjectCostBreakdownUseCase", () => {
+     });
+   });
+ 
+-  it("computes estimatedCost, revenue and margin against the human cost", async () => {
++  it("computes estimatedCost, revenue and margin against the total cost", async () => {
+     const useCase = new ProjectCostBreakdownUseCase(
+-      new FakeAgg({ human: 1000, minutes: 6000 }, { estimateHours: 120, ratePerHour: 80 }),
++      new FakeAgg({ human: 1000, ai: 0, minutes: 6000 }, { estimateHours: 120, ratePerHour: 80 }),
+     );
+     const result = await useCase.execute("p1");
+     expect(result.estimateHours).toBe(120);
+@@ -68,9 +72,21 @@ describe("ProjectCostBreakdownUseCase", () => {
+     expect(result.marginPerHour).toBe(70);
+   });
+ 
++  it("includes AI cost in the total and subtracts it from the margin", async () => {
++    const useCase = new ProjectCostBreakdownUseCase(
++      new FakeAgg({ human: 1000, ai: 250.5, minutes: 6000 }, { estimateHours: null, ratePerHour: 80 }),
++    );
++    const result = await useCase.execute("p1");
++    expect(result.human).toBe(1000);
++    expect(result.ai).toBe(250.5);
++    expect(result.total).toBe(1250.5);
++    expect(result.revenue).toBe(8000);
++    expect(result.margin).toBe(6749.5);
++  });
++
+   it("leaves estimatedCost null when estimateHours is missing but still computes revenue", async () => {
+     const useCase = new ProjectCostBreakdownUseCase(
+-      new FakeAgg({ human: 500, minutes: 3000 }, { estimateHours: null, ratePerHour: 60 }),
++      new FakeAgg({ human: 500, ai: 0, minutes: 3000 }, { estimateHours: null, ratePerHour: 60 }),
+     );
+     const result = await useCase.execute("p1");
+     expect(result.estimatedCost).toBeNull();
+@@ -81,7 +97,7 @@ describe("ProjectCostBreakdownUseCase", () => {
+ 
+   it("returns marginPerHour null when there are no tracked hours", async () => {
+     const useCase = new ProjectCostBreakdownUseCase(
+-      new FakeAgg({ human: 0, minutes: 0 }, { estimateHours: 10, ratePerHour: 90 }),
++      new FakeAgg({ human: 0, ai: 0, minutes: 0 }, { estimateHours: 10, ratePerHour: 90 }),
+     );
+     const result = await useCase.execute("p1");
+     expect(result.revenue).toBe(0);
+diff --git a/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.ts b/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.ts
+index a770fcb..f47e563 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/project-cost-breakdown.use-case.ts
+@@ -23,10 +23,10 @@ export class ProjectCostBreakdownUseCase {
+ 
+   async execute(projectId: string): Promise<ProjectCostBreakdown> {
+     const [row, estimate] = await Promise.all([
+-      this.agg.projectHumanCost(projectId),
++      this.agg.projectCost(projectId),
+       this.agg.projectEstimate(projectId),
+     ]);
+-    const breakdown = breakdownCost(row.human, 0);
++    const breakdown = breakdownCost(row.human, row.ai);
+     const { estimateHours, ratePerHour } = estimate;
+ 
+     const estimatedCost =
+@@ -34,7 +34,7 @@ export class ProjectCostBreakdownUseCase {
+ 
+     const hours = row.minutes / 60;
+     const revenue = ratePerHour != null ? round2(hours * ratePerHour) : null;
+-    const margin = revenue != null ? round2(revenue - breakdown.human) : null;
++    const margin = revenue != null ? round2(revenue - breakdown.total) : null;
+     const marginPerHour = margin != null && hours > 0 ? round2(margin / hours) : null;
+ 
+     return {
+diff --git a/apps/api/src/modules/reporting/application/use-cases/today-summary.use-case.spec.ts b/apps/api/src/modules/reporting/application/use-cases/today-summary.use-case.spec.ts
+index 93eb9df..9e13ae8 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/today-summary.use-case.spec.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/today-summary.use-case.spec.ts
+@@ -8,10 +8,11 @@ import {
+   TeamTodayRow,
+   TodaySummary,
+ } from "../../domain/ports/cost-aggregation.port";
++import type { DailyEntryRow } from "../../domain/daily-report";
+ 
+ class FakeAgg implements CostAggregationPort {
+-  async projectHumanCost(): Promise<ProjectCostRow> {
+-    return { human: 0, minutes: 0 };
++  async projectCost(): Promise<ProjectCostRow> {
++    return { human: 0, ai: 0, minutes: 0 };
+   }
+   async projectEstimate(): Promise<ProjectEstimateRow> {
+     return { estimateHours: null, ratePerHour: null };
+@@ -19,7 +20,10 @@ class FakeAgg implements CostAggregationPort {
+   async costByPerson(): Promise<PersonCost[]> {
+     return [];
+   }
+-  async weeklyHumanCost(): Promise<WeeklyCost[]> {
++  async weeklyCost(): Promise<WeeklyCost[]> {
++    return [];
++  }
++  async dailyEntries(): Promise<DailyEntryRow[]> {
+     return [];
+   }
+   async todaySummary(): Promise<TodaySummary> {
+diff --git a/apps/api/src/modules/reporting/application/use-cases/weekly-cost-series.use-case.ts b/apps/api/src/modules/reporting/application/use-cases/weekly-cost-series.use-case.ts
+index 34d7cb8..b19b16f 100644
+--- a/apps/api/src/modules/reporting/application/use-cases/weekly-cost-series.use-case.ts
++++ b/apps/api/src/modules/reporting/application/use-cases/weekly-cost-series.use-case.ts
+@@ -6,7 +6,7 @@ import { COST_AGGREGATION, CostAggregationPort } from "../../domain/ports/cost-a
+ export class WeeklyCostSeriesUseCase {
+   constructor(@Inject(COST_AGGREGATION) private readonly agg: CostAggregationPort) {}
+ 
+-  execute(weeks = 8): Promise<WeeklyCost[]> {
+-    return this.agg.weeklyHumanCost(weeks);
++  execute(weeks = 8, projectId?: string): Promise<WeeklyCost[]> {
++    return this.agg.weeklyCost(weeks, projectId);
+   }
+ }
+diff --git a/apps/api/src/modules/reporting/domain/daily-report.spec.ts b/apps/api/src/modules/reporting/domain/daily-report.spec.ts
+new file mode 100644
+index 0000000..cf1ae29
+--- /dev/null
++++ b/apps/api/src/modules/reporting/domain/daily-report.spec.ts
+@@ -0,0 +1,48 @@
++import { DailyEntryRow, groupByDay } from "./daily-report";
++
++const row = (over: Partial<DailyEntryRow>): DailyEntryRow => ({
++  day: "2026-10-24",
++  kind: "human",
++  minutes: 10,
++  timeCost: 0,
++  aiCost: 0,
++  taskId: "t1",
++  taskCode: "S-1",
++  taskTitle: "Task one",
++  projectName: "p",
++  ...over,
++});
++
++describe("groupByDay", () => {
++  it("splits minutes by kind and sums costs per day", () => {
++    const [day] = groupByDay([
++      row({ kind: "agent", minutes: 30, aiCost: 1.234 }),
++      row({ kind: "wait", minutes: 20 }),
++      row({ kind: "human", minutes: 15, timeCost: 7.5 }),
++    ]);
++    expect(day).toMatchObject({
++      date: "2026-10-24",
++      agentMinutes: 30,
++      waitMinutes: 20,
++      humanMinutes: 15,
++      totalMinutes: 65,
++      timeCost: 7.5,
++      aiCost: 1.23,
++    });
++  });
++
++  it("orders days newest first and tasks by time spent", () => {
++    const days = groupByDay([
++      row({ day: "2026-10-22", taskId: "t1" }),
++      row({ day: "2026-10-24", taskId: "t1", minutes: 5 }),
++      row({ day: "2026-10-24", taskId: "t2", taskCode: "S-2", minutes: 40 }),
++      row({ day: "2026-10-24", taskId: "t1", minutes: 5 }),
++    ]);
++    expect(days.map((d) => d.date)).toEqual(["2026-10-24", "2026-10-22"]);
++    expect(days[0].tasks.map((t) => [t.code, t.minutes])).toEqual([["S-2", 40], ["S-1", 10]]);
++  });
++
++  it("returns an empty list when there are no entries", () => {
++    expect(groupByDay([])).toEqual([]);
++  });
++});
+diff --git a/apps/api/src/modules/reporting/domain/daily-report.ts b/apps/api/src/modules/reporting/domain/daily-report.ts
+new file mode 100644
+index 0000000..fe0c4b7
+--- /dev/null
++++ b/apps/api/src/modules/reporting/domain/daily-report.ts
+@@ -0,0 +1,49 @@
++import type { DailyReport } from "@acm/shared";
++
++export type WorkKind = "agent" | "wait" | "human";
++
++export interface DailyEntryRow {
++  day: string;
++  kind: WorkKind;
++  minutes: number;
++  timeCost: number;
++  aiCost: number;
++  taskId: string;
++  taskCode: string;
++  taskTitle: string;
++  projectName: string;
++}
++
++const round2 = (n: number): number => Math.round(n * 100) / 100;
++
++const MINUTES_BY_KIND = { agent: "agentMinutes", wait: "waitMinutes", human: "humanMinutes" } as const;
++
++function emptyDay(date: string): DailyReport {
++  return { date, agentMinutes: 0, waitMinutes: 0, humanMinutes: 0, totalMinutes: 0, timeCost: 0, aiCost: 0, tasks: [] };
++}
++
++function addTask(day: DailyReport, row: DailyEntryRow): void {
++  const task = day.tasks.find((t) => t.taskId === row.taskId);
++  if (task) task.minutes += row.minutes;
++  else day.tasks.push({ taskId: row.taskId, code: row.taskCode, title: row.taskTitle, project: row.projectName, minutes: row.minutes });
++}
++
++function addRow(day: DailyReport, row: DailyEntryRow): void {
++  day[MINUTES_BY_KIND[row.kind]] += row.minutes;
++  day.totalMinutes += row.minutes;
++  day.timeCost += row.timeCost;
++  day.aiCost += row.aiCost;
++  addTask(day, row);
++}
++
++export function groupByDay(rows: DailyEntryRow[]): DailyReport[] {
++  const days = new Map<string, DailyReport>();
++  for (const row of rows) {
++    const day = days.get(row.day) ?? emptyDay(row.day);
++    addRow(day, row);
++    days.set(row.day, day);
++  }
++  return [...days.values()]
++    .sort((a, b) => b.date.localeCompare(a.date))
++    .map((d) => ({ ...d, timeCost: round2(d.timeCost), aiCost: round2(d.aiCost), tasks: d.tasks.sort((a, b) => b.minutes - a.minutes) }));
++}
+diff --git a/apps/api/src/modules/reporting/domain/ports/cost-aggregation.port.ts b/apps/api/src/modules/reporting/domain/ports/cost-aggregation.port.ts
+index 0170350..2427a7e 100644
+--- a/apps/api/src/modules/reporting/domain/ports/cost-aggregation.port.ts
++++ b/apps/api/src/modules/reporting/domain/ports/cost-aggregation.port.ts
+@@ -1,9 +1,11 @@
+ import type { PersonCost, WeeklyCost } from "@acm/shared";
++import type { DailyEntryRow } from "../daily-report";
+ 
+ export const COST_AGGREGATION = Symbol("COST_AGGREGATION");
+ 
+ export interface ProjectCostRow {
+   human: number;
++  ai: number;
+   minutes: number;
+ }
+ 
+@@ -36,10 +38,11 @@ export interface TeamTodayRow {
+ }
+ 
+ export interface CostAggregationPort {
+-  projectHumanCost(projectId: string): Promise<ProjectCostRow>;
++  projectCost(projectId: string): Promise<ProjectCostRow>;
+   projectEstimate(projectId: string): Promise<ProjectEstimateRow>;
+   costByPerson(projectId?: string): Promise<PersonCost[]>;
+-  weeklyHumanCost(weeks: number): Promise<WeeklyCost[]>;
++  weeklyCost(weeks: number, projectId?: string): Promise<WeeklyCost[]>;
++  dailyEntries(from: Date, projectId?: string): Promise<DailyEntryRow[]>;
+   todaySummary(from: Date, to: Date, weekFrom: Date): Promise<TodaySummary>;
+   teamToday(from: Date, to: Date): Promise<TeamTodayRow[]>;
+   marginSummary(): Promise<MarginSummary>;
+diff --git a/apps/api/src/modules/reporting/infrastructure/persistence/prisma-cost-aggregation.repository.ts b/apps/api/src/modules/reporting/infrastructure/persistence/prisma-cost-aggregation.repository.ts
+index ca231c1..9b88af4 100644
+--- a/apps/api/src/modules/reporting/infrastructure/persistence/prisma-cost-aggregation.repository.ts
++++ b/apps/api/src/modules/reporting/infrastructure/persistence/prisma-cost-aggregation.repository.ts
+@@ -10,9 +10,19 @@ import {
+   TeamTodayRow,
+   TodaySummary,
+ } from "../../domain/ports/cost-aggregation.port";
++import type { DailyEntryRow, WorkKind } from "../../domain/daily-report";
+ 
+ const round2 = (n: number): number => Math.round(n * 100) / 100;
+ 
++// Roles of the service members created by the Claude Code tracking hook (hooks/config.json).
++const KIND_BY_ROLE: Record<string, WorkKind> = { agent: "agent", system: "wait" };
++const kindOfRole = (role: string): WorkKind => KIND_BY_ROLE[role] ?? "human";
++
++function localDay(date: Date): string {
++  const pad = (n: number) => String(n).padStart(2, "0");
++  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
++}
++
+ function weekLabel(date: Date): string {
+   const start = new Date(date.getFullYear(), 0, 1);
+   const diffDays = Math.floor((date.getTime() - start.getTime()) / 86_400_000);
+@@ -24,15 +34,17 @@ function weekLabel(date: Date): string {
+ export class PrismaCostAggregationRepository implements CostAggregationPort {
+   constructor(private readonly prisma: PrismaService) {}
+ 
+-  async projectHumanCost(projectId: string): Promise<ProjectCostRow> {
+-    const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId } } });
++  async projectCost(projectId: string): Promise<ProjectCostRow> {
++    const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId } }, include: { aiRuns: true } });
+     let human = 0;
++    let ai = 0;
+     let minutes = 0;
+     for (const r of rows) {
+       human += computeEntryCost(r as unknown as TimeEntry);
++      ai += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
+       minutes += r.minutes;
+     }
+-    return { human: round2(human), minutes };
++    return { human: round2(human), ai: round2(ai), minutes };
+   }
+ 
+   async projectEstimate(projectId: string): Promise<ProjectEstimateRow> {
+@@ -49,29 +61,55 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
+     for (const m of members) {
+       const rows = await this.prisma.timeEntry.findMany({
+         where: { memberId: m.id, ...(projectId ? { task: { projectId } } : {}) },
++        include: { aiRuns: true },
+       });
+       let human = 0;
++      let ai = 0;
+       let minutes = 0;
+       for (const r of rows) {
+         human += computeEntryCost(r as unknown as TimeEntry);
++        ai += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
+         minutes += r.minutes;
+       }
+-      const total = round2(human);
+-      result.push({ memberId: m.id, name: m.name, minutes, human: total, ai: 0, total });
++      result.push({ memberId: m.id, name: m.name, minutes, human: round2(human), ai: round2(ai), total: round2(human + ai) });
+     }
+     return result;
+   }
+ 
+-  async weeklyHumanCost(weeks: number): Promise<WeeklyCost[]> {
+-    const rows = await this.prisma.timeEntry.findMany({ orderBy: { startedAt: "asc" } });
+-    const byWeek = new Map<string, number>();
++  async weeklyCost(weeks: number, projectId?: string): Promise<WeeklyCost[]> {
++    const rows = await this.prisma.timeEntry.findMany({
++      where: projectId ? { task: { projectId } } : {},
++      orderBy: { startedAt: "asc" },
++      include: { aiRuns: true },
++    });
++    const byWeek = new Map<string, { human: number; ai: number }>();
+     for (const r of rows) {
+-      const label = weekLabel(r.startedAt);
+-      byWeek.set(label, (byWeek.get(label) ?? 0) + computeEntryCost(r as unknown as TimeEntry));
++      const acc = byWeek.get(weekLabel(r.startedAt)) ?? { human: 0, ai: 0 };
++      acc.human += computeEntryCost(r as unknown as TimeEntry);
++      acc.ai += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
++      byWeek.set(weekLabel(r.startedAt), acc);
+     }
+     return [...byWeek.entries()]
+       .slice(-weeks)
+-      .map(([week, human]) => ({ week, human: round2(human), ai: 0 }));
++      .map(([week, c]) => ({ week, human: round2(c.human), ai: round2(c.ai) }));
++  }
++
++  async dailyEntries(from: Date, projectId?: string): Promise<DailyEntryRow[]> {
++    const rows = await this.prisma.timeEntry.findMany({
++      where: { startedAt: { gte: from }, ...(projectId ? { task: { projectId } } : {}) },
++      include: { aiRuns: true, member: true, task: { include: { project: true } } },
++    });
++    return rows.map((r) => ({
++      day: localDay(r.startedAt),
++      kind: kindOfRole(r.member.role),
++      minutes: r.minutes,
++      timeCost: computeEntryCost(r as unknown as TimeEntry),
++      aiCost: r.aiRuns.reduce((s, a) => s + a.costUsd, 0),
++      taskId: r.taskId,
++      taskCode: r.task.code,
++      taskTitle: r.task.title,
++      projectName: r.task.project.name,
++    }));
+   }
+ 
+   async todaySummary(from: Date, to: Date, weekFrom: Date): Promise<TodaySummary> {
+diff --git a/apps/api/src/modules/reporting/interfaces/http/reporting.controller.ts b/apps/api/src/modules/reporting/interfaces/http/reporting.controller.ts
+index f9cbd44..2a25616 100644
+--- a/apps/api/src/modules/reporting/interfaces/http/reporting.controller.ts
++++ b/apps/api/src/modules/reporting/interfaces/http/reporting.controller.ts
+@@ -6,6 +6,12 @@ import { WeeklyCostSeriesUseCase } from "../../application/use-cases/weekly-cost
+ import { TodaySummaryUseCase } from "../../application/use-cases/today-summary.use-case";
+ import { TeamTodayUseCase } from "../../application/use-cases/team-today.use-case";
+ import { MarginSummaryUseCase } from "../../application/use-cases/margin-summary.use-case";
++import { DailyReportUseCase } from "../../application/use-cases/daily-report.use-case";
++
++function daysAgo(days: number): Date {
++  const now = new Date();
++  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
++}
+ 
+ function dayBounds(): { from: Date; to: Date } {
+   const now = new Date();
+@@ -30,6 +36,7 @@ export class ReportingController {
+     private readonly todaySummary: TodaySummaryUseCase,
+     private readonly teamToday: TeamTodayUseCase,
+     private readonly marginSummary: MarginSummaryUseCase,
++    private readonly dailyReport: DailyReportUseCase,
+   ) {}
+ 
+   @Get("projects/:id/cost") projectCost(@Param("id") id: string) {
+@@ -40,8 +47,12 @@ export class ReportingController {
+     return this.byPerson.execute(projectId);
+   }
+ 
+-  @Get("reports/weekly") weeklyCost(@Query("weeks") weeks?: string) {
+-    return this.weekly.execute(weeks ? Number(weeks) : 8);
++  @Get("reports/weekly") weeklyCost(@Query("weeks") weeks?: string, @Query("projectId") projectId?: string) {
++    return this.weekly.execute(weeks ? Number(weeks) : 8, projectId || undefined);
++  }
++
++  @Get("reports/daily") daily(@Query("days") days?: string, @Query("projectId") projectId?: string) {
++    return this.dailyReport.execute(daysAgo(Math.max(1, Number(days) || 30)), projectId || undefined);
+   }
+ 
+   @Get("reports/today") today() {
+diff --git a/apps/api/src/modules/reporting/reporting.module.ts b/apps/api/src/modules/reporting/reporting.module.ts
+index c34861a..c34a356 100644
+--- a/apps/api/src/modules/reporting/reporting.module.ts
++++ b/apps/api/src/modules/reporting/reporting.module.ts
+@@ -6,6 +6,7 @@ import { WeeklyCostSeriesUseCase } from "./application/use-cases/weekly-cost-ser
+ import { TodaySummaryUseCase } from "./application/use-cases/today-summary.use-case";
+ import { TeamTodayUseCase } from "./application/use-cases/team-today.use-case";
+ import { MarginSummaryUseCase } from "./application/use-cases/margin-summary.use-case";
++import { DailyReportUseCase } from "./application/use-cases/daily-report.use-case";
+ import { PrismaCostAggregationRepository } from "./infrastructure/persistence/prisma-cost-aggregation.repository";
+ import { ReportingController } from "./interfaces/http/reporting.controller";
+ 
+@@ -18,6 +19,7 @@ import { ReportingController } from "./interfaces/http/reporting.controller";
+     TodaySummaryUseCase,
+     TeamTodayUseCase,
+     MarginSummaryUseCase,
++    DailyReportUseCase,
+     { provide: COST_AGGREGATION, useClass: PrismaCostAggregationRepository },
+   ],
+ })
+diff --git a/apps/api/src/modules/tasks/application/use-cases/create-task.use-case.spec.ts b/apps/api/src/modules/tasks/application/use-cases/create-task.use-case.spec.ts
+index 483c6a6..13bf625 100644
+--- a/apps/api/src/modules/tasks/application/use-cases/create-task.use-case.spec.ts
++++ b/apps/api/src/modules/tasks/application/use-cases/create-task.use-case.spec.ts
+@@ -6,7 +6,7 @@ class FakeTaskRepo implements TaskRepositoryPort {
+   public lastCreate?: CreateTaskData;
+   async create(data: CreateTaskData): Promise<Task> {
+     this.lastCreate = data;
+-    return { id: "t1", status: "todo", createdAt: "now", ...data };
++    return { id: "t1", status: "todo", summary: null, createdAt: "now", ...data };
+   }
+   async findAll(): Promise<Task[]> {
+     return [];
+diff --git a/apps/api/src/modules/tasks/domain/ports/task.repository.port.ts b/apps/api/src/modules/tasks/domain/ports/task.repository.port.ts
+index bdb1ade..c99a65d 100644
+--- a/apps/api/src/modules/tasks/domain/ports/task.repository.port.ts
++++ b/apps/api/src/modules/tasks/domain/ports/task.repository.port.ts
+@@ -14,6 +14,7 @@ export interface UpdateTaskData {
+   code?: string;
+   title?: string;
+   phase?: string | null;
++  summary?: string | null;
+   estimateMinutes?: number | null;
+   status?: string;
+ }
+diff --git a/apps/api/src/modules/tasks/infrastructure/persistence/task.mapper.ts b/apps/api/src/modules/tasks/infrastructure/persistence/task.mapper.ts
+index 7003f15..43e20bf 100644
+--- a/apps/api/src/modules/tasks/infrastructure/persistence/task.mapper.ts
++++ b/apps/api/src/modules/tasks/infrastructure/persistence/task.mapper.ts
+@@ -8,6 +8,7 @@ export function toDomainTask(row: PrismaTask): Task {
+     code: row.code,
+     title: row.title,
+     phase: row.phase,
++    summary: row.summary,
+     status: row.status as Task["status"],
+     estimateMinutes: row.estimateMinutes,
+     createdAt: row.createdAt.toISOString(),
+diff --git a/apps/api/src/modules/tasks/interfaces/http/dto/update-task.dto.ts b/apps/api/src/modules/tasks/interfaces/http/dto/update-task.dto.ts
+index 76ceadb..89da039 100644
+--- a/apps/api/src/modules/tasks/interfaces/http/dto/update-task.dto.ts
++++ b/apps/api/src/modules/tasks/interfaces/http/dto/update-task.dto.ts
+@@ -1,7 +1,8 @@
+ import { PartialType } from "@nestjs/mapped-types";
+-import { IsIn, IsOptional } from "class-validator";
++import { IsIn, IsOptional, IsString, MaxLength } from "class-validator";
+ import { CreateTaskDto } from "./create-task.dto";
+ 
+ export class UpdateTaskDto extends PartialType(CreateTaskDto) {
+-  @IsOptional() @IsIn(["todo", "in_progress", "review", "done"]) status?: string;
++  @IsOptional() @IsIn(["todo", "in_progress", "review", "waiting", "hold", "done"]) status?: string;
++  @IsOptional() @IsString() @MaxLength(2000) summary?: string;
+ }
+diff --git a/apps/api/src/modules/time-entries/application/use-cases/list-project-entries.use-case.spec.ts b/apps/api/src/modules/time-entries/application/use-cases/list-project-entries.use-case.spec.ts
+index cd69eba..d7276f3 100644
+--- a/apps/api/src/modules/time-entries/application/use-cases/list-project-entries.use-case.spec.ts
++++ b/apps/api/src/modules/time-entries/application/use-cases/list-project-entries.use-case.spec.ts
+@@ -15,6 +15,7 @@ const entry: ProjectEntryView = {
+   taskTitle: "Wire endpoint",
+   memberId: "m1",
+   memberName: "Ada",
++  note: null,
+   minutes: 45,
+   cost: 36.5,
+ };
+diff --git a/apps/api/src/modules/time-entries/domain/ports/time-entry.repository.port.ts b/apps/api/src/modules/time-entries/domain/ports/time-entry.repository.port.ts
+index 58d767c..15729a6 100644
+--- a/apps/api/src/modules/time-entries/domain/ports/time-entry.repository.port.ts
++++ b/apps/api/src/modules/time-entries/domain/ports/time-entry.repository.port.ts
+@@ -19,8 +19,11 @@ export interface TodayEntryView {
+   origin: string;
+   taskCode: string;
+   taskTitle: string;
++  memberName: string;
++  note: string | null;
+   minutes: number;
+   cost: number;
++  aiCost: number;
+ }
+ 
+ export interface ProjectEntryView {
+@@ -32,6 +35,7 @@ export interface ProjectEntryView {
+   taskTitle: string;
+   memberId: string;
+   memberName: string;
++  note: string | null;
+   minutes: number;
+   cost: number;
+ }
+diff --git a/apps/api/src/modules/time-entries/infrastructure/persistence/prisma-time-entry.repository.ts b/apps/api/src/modules/time-entries/infrastructure/persistence/prisma-time-entry.repository.ts
+index b7f3573..31c6b5d 100644
+--- a/apps/api/src/modules/time-entries/infrastructure/persistence/prisma-time-entry.repository.ts
++++ b/apps/api/src/modules/time-entries/infrastructure/persistence/prisma-time-entry.repository.ts
+@@ -1,6 +1,6 @@
+ import { Injectable } from "@nestjs/common";
+ import type { TimeEntry } from "@acm/shared";
+-import { computeEntryCost } from "@acm/shared";
++import { computeEntryCost, localHourMinute } from "@acm/shared";
+ import { PrismaService } from "../../../../prisma/prisma.service";
+ import {
+   CreateTimeEntryData,
+@@ -42,6 +42,7 @@ export class PrismaTimeEntryRepository implements TimeEntryRepositoryPort {
+       taskTitle: r.task.title,
+       memberId: r.memberId,
+       memberName: r.member.name,
++      note: r.note,
+       minutes: r.minutes,
+       cost: computeEntryCost(r as unknown as TimeEntry),
+     }));
+@@ -51,16 +52,19 @@ export class PrismaTimeEntryRepository implements TimeEntryRepositoryPort {
+     const rows = await this.prisma.timeEntry.findMany({
+       where: { startedAt: { gte: from, lt: to } },
+       orderBy: { startedAt: "desc" },
+-      include: { task: true },
++      include: { task: true, member: true, aiRuns: true },
+     });
+     return rows.map((r) => ({
+       id: r.id,
+-      time: r.startedAt.toISOString().slice(11, 16),
++      time: localHourMinute(r.startedAt),
+       origin: r.origin,
+       taskCode: r.task.code,
+       taskTitle: r.task.title,
++      memberName: r.member.name,
++      note: r.note,
+       minutes: r.minutes,
+       cost: computeEntryCost(r as unknown as TimeEntry),
++      aiCost: Math.round(r.aiRuns.reduce((s, a) => s + a.costUsd, 0) * 100) / 100,
+     }));
+   }
+ }
+diff --git a/apps/api/src/modules/time-entries/interfaces/http/time-entries.controller.ts b/apps/api/src/modules/time-entries/interfaces/http/time-entries.controller.ts
+index a8d2670..0f0a0ed 100644
+--- a/apps/api/src/modules/time-entries/interfaces/http/time-entries.controller.ts
++++ b/apps/api/src/modules/time-entries/interfaces/http/time-entries.controller.ts
+@@ -1,4 +1,5 @@
+-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
++import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
++import { localDayBounds } from "@acm/shared";
+ import { AuthGuard } from "../../../../auth/auth.guard";
+ import { CurrentUser } from "../../../../auth/current-user.decorator";
+ import type { AuthedUser } from "../../../../auth/auth-provider.interface";
+@@ -36,6 +37,12 @@ export class TimeEntriesController {
+     return this.listToday.execute(from, to);
+   }
+ 
++  @Get("day") day(@Query("date") date = "") {
++    const bounds = localDayBounds(date);
++    if (!bounds) throw new BadRequestException("date must be YYYY-MM-DD");
++    return this.listToday.execute(bounds.from, bounds.to);
++  }
++
+   @Get("task/:taskId") forTask(@Param("taskId") taskId: string) {
+     return this.listForTask.execute(taskId);
+   }
+diff --git a/apps/web/src/features/reporting/api/use-reporting.ts b/apps/web/src/features/reporting/api/use-reporting.ts
+index d870781..619b53c 100644
+--- a/apps/web/src/features/reporting/api/use-reporting.ts
++++ b/apps/web/src/features/reporting/api/use-reporting.ts
+@@ -1,5 +1,5 @@
+ import { useQuery } from "@tanstack/react-query";
+-import type { PersonCost, WeeklyCost } from "@acm/shared";
++import type { DailyReport, PersonCost, WeeklyCost } from "@acm/shared";
+ import { apiClient } from "../../../lib/api-client";
+ 
+ interface ProjectCost {
+@@ -23,10 +23,19 @@ export function useProjectCost(projectId: string) {
+   });
+ }
+ 
+-export function useCostByPerson() {
++const projectQuery = (projectId?: string) => (projectId ? `projectId=${encodeURIComponent(projectId)}` : "");
++
++export function useCostByPerson(projectId?: string) {
++  return useQuery({
++    queryKey: ["cost-by-person", projectId ?? "all"],
++    queryFn: () => apiClient.get<PersonCost[]>(`/reports/by-person?${projectQuery(projectId)}`),
++  });
++}
++
++export function useDailyReport(projectId?: string, days = 30) {
+   return useQuery({
+-    queryKey: ["cost-by-person"],
+-    queryFn: () => apiClient.get<PersonCost[]>("/reports/by-person"),
++    queryKey: ["daily-report", projectId ?? "all", days],
++    queryFn: () => apiClient.get<DailyReport[]>(`/reports/daily?days=${days}&${projectQuery(projectId)}`),
+   });
+ }
+ 
+@@ -38,9 +47,9 @@ export function useProjectTeam(projectId: string) {
+   });
+ }
+ 
+-export function useWeeklyCost() {
++export function useWeeklyCost(projectId?: string) {
+   return useQuery({
+-    queryKey: ["weekly-cost"],
+-    queryFn: () => apiClient.get<WeeklyCost[]>("/reports/weekly"),
++    queryKey: ["weekly-cost", projectId ?? "all"],
++    queryFn: () => apiClient.get<WeeklyCost[]>(`/reports/weekly?${projectQuery(projectId)}`),
+   });
+ }
+diff --git a/apps/web/src/features/reporting/components/DailyReportPanel.tsx b/apps/web/src/features/reporting/components/DailyReportPanel.tsx
+new file mode 100644
+index 0000000..a52fa21
+--- /dev/null
++++ b/apps/web/src/features/reporting/components/DailyReportPanel.tsx
+@@ -0,0 +1,69 @@
++import { useTranslation } from "react-i18next";
++import type { DailyTask } from "@acm/shared";
++import { Panel } from "../../../components/Panel";
++import { DataTable } from "../../../components/DataTable";
++import { useDailyReport } from "../api/use-reporting";
++import { formatMinutes as hm } from "../../../lib/format-minutes";
++import { colors } from "../../../theme/tokens";
++
++const TASKS_SHOWN = 4;
++
++function dayLabel(date: string, lang: string): string {
++  return new Date(`${date}T00:00:00`).toLocaleDateString(lang, { weekday: "short", day: "2-digit", month: "2-digit" });
++}
++
++function TaskList({ tasks, showProject }: { tasks: DailyTask[]; showProject: boolean }) {
++  const shown = tasks.slice(0, TASKS_SHOWN);
++  const rest = tasks.length - shown.length;
++  return (
++    <div style={{ fontSize: 12, color: colors.muted, marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
++      {shown.map((t) => (
++        <span key={t.taskId}>
++          <span className="mono" style={{ color: colors.dim }}>{hm(t.minutes)}</span> {t.title}
++          {showProject && <span style={{ color: colors.dim }}> · {t.project}</span>}
++        </span>
++      ))}
++      {rest > 0 && <span style={{ color: colors.dim }}>+{rest}</span>}
++    </div>
++  );
++}
++
++export function DailyReportPanel({ projectId }: { projectId?: string }) {
++  const { t, i18n } = useTranslation();
++  const { data: days = [] } = useDailyReport(projectId);
++  const mono = (value: string, color: string = colors.text) => <span className="mono" style={{ color }}>{value}</span>;
++
++  return (
++    <Panel title={t("reports.dailyPanelTitle")}>
++      <DataTable
++        columns={[
++          { key: "day", label: t("reports.colDay") },
++          { key: "human", label: t("reports.colHuman"), width: 90, align: "right" },
++          { key: "agent", label: t("reports.colAgent"), width: 90, align: "right" },
++          { key: "wait", label: t("reports.colWait"), width: 90, align: "right" },
++          { key: "total", label: t("reports.colTotal"), width: 90, align: "right" },
++          { key: "ai", label: t("reports.colIa"), width: 80, align: "right" },
++          { key: "cost", label: t("reports.colTimeCost"), width: 90, align: "right" },
++        ]}
++        rows={days.map((d) => ({
++          id: d.date,
++          cells: {
++            day: (
++              <div>
++                <span style={{ fontWeight: 600 }}>{dayLabel(d.date, i18n.language)}</span>
++                <TaskList tasks={d.tasks} showProject={!projectId} />
++              </div>
++            ),
++            human: mono(hm(d.humanMinutes), colors.green),
++            agent: mono(hm(d.agentMinutes), colors.blue),
++            wait: mono(hm(d.waitMinutes), colors.amber),
++            total: <span className="mono" style={{ fontWeight: 700 }}>{hm(d.totalMinutes)}</span>,
++            ai: mono(`$${d.aiCost}`, colors.blue),
++            cost: mono(`$${d.timeCost}`),
++          },
++        }))}
++        emptyLabel={t("reports.dailyEmpty")}
++      />
++    </Panel>
++  );
++}
+diff --git a/apps/web/src/features/time-entries/api/use-project-entries.ts b/apps/web/src/features/time-entries/api/use-project-entries.ts
+index d829cb8..cde4ec2 100644
+--- a/apps/web/src/features/time-entries/api/use-project-entries.ts
++++ b/apps/web/src/features/time-entries/api/use-project-entries.ts
+@@ -10,6 +10,7 @@ export interface ProjectEntryView {
+   taskTitle: string;
+   memberId: string;
+   memberName: string;
++  note: string | null;
+   minutes: number;
+   cost: number;
+ }
+diff --git a/apps/web/src/features/time-entries/api/use-today-entries.ts b/apps/web/src/features/time-entries/api/use-today-entries.ts
+index b2a6ab0..876b75f 100644
+--- a/apps/web/src/features/time-entries/api/use-today-entries.ts
++++ b/apps/web/src/features/time-entries/api/use-today-entries.ts
+@@ -7,8 +7,11 @@ export interface TodayEntryView {
+   origin: string;
+   taskCode: string;
+   taskTitle: string;
++  memberName: string;
++  note: string | null;
+   minutes: number;
+   cost: number;
++  aiCost: number;
+ }
+ 
+ export function useTodayEntries() {
+@@ -17,3 +20,10 @@ export function useTodayEntries() {
+     queryFn: () => apiClient.get<TodayEntryView[]>("/time-entries/today"),
+   });
+ }
++
++export function useDayEntries(date: string) {
++  return useQuery({
++    queryKey: ["day-entries", date],
++    queryFn: () => apiClient.get<TodayEntryView[]>(`/time-entries/day?date=${date}`),
++  });
++}
+diff --git a/apps/web/src/features/time-entries/components/EntriesTimeline.tsx b/apps/web/src/features/time-entries/components/EntriesTimeline.tsx
+new file mode 100644
+index 0000000..eff84ea
+--- /dev/null
++++ b/apps/web/src/features/time-entries/components/EntriesTimeline.tsx
+@@ -0,0 +1,49 @@
++import { useTranslation } from "react-i18next";
++import { DataTable } from "../../../components/DataTable";
++import { Tag } from "../../../components/Tag";
++import type { TodayEntryView } from "../api/use-today-entries";
++import { colors } from "../../../theme/tokens";
++
++const HUMAN_ORIGINS = new Set(["manual", "timer"]);
++
++function hm(min: number): string {
++  return `${Math.floor(min / 60)}h ${min % 60}m`;
++}
++
++export function EntriesTimeline({ entries, emptyLabel }: { entries: TodayEntryView[]; emptyLabel: string }) {
++  const { t } = useTranslation();
++  return (
++    <DataTable
++      columns={[
++        { key: "time", label: t("tracker.colHora"), width: 70 },
++        { key: "origin", label: t("tracker.colOrigen"), width: 130 },
++        { key: "who", label: t("tracker.colWho"), width: 150 },
++        { key: "task", label: t("tracker.colTarea") },
++        { key: "dur", label: t("tracker.colDuracion"), width: 100, align: "right" },
++        { key: "cost", label: t("tracker.colCosto"), width: 80, align: "right" },
++      ]}
++      rows={entries.map((e) => ({
++        id: e.id,
++        cells: {
++          time: <span className="mono" style={{ color: colors.dim }}>{e.time}</span>,
++          origin: (
++            <Tag
++              label={t(`tracker.origin.${e.origin}`, { defaultValue: e.origin })}
++              color={HUMAN_ORIGINS.has(e.origin) ? colors.green : colors.blue}
++            />
++          ),
++          who: <span style={{ color: colors.muted, fontSize: 13 }}>{e.memberName}</span>,
++          task: (
++            <div>
++              <span style={{ fontWeight: 500 }}>{e.taskCode} · {e.taskTitle}</span>
++              {e.note && <div style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>{e.note}</div>}
++            </div>
++          ),
++          dur: <span className="mono" style={{ color: colors.muted }}>{hm(e.minutes)}</span>,
++          cost: <span className="mono" style={{ fontWeight: 700 }}>${e.cost}</span>,
++        },
++      }))}
++      emptyLabel={emptyLabel}
++    />
++  );
++}
+diff --git a/apps/web/src/features/time-entries/components/ProjectTimeline.tsx b/apps/web/src/features/time-entries/components/ProjectTimeline.tsx
+index 0d7923a..9c29c23 100644
+--- a/apps/web/src/features/time-entries/components/ProjectTimeline.tsx
++++ b/apps/web/src/features/time-entries/components/ProjectTimeline.tsx
+@@ -34,10 +34,13 @@ export function ProjectTimeline({ projectId }: { projectId: string }) {
+           cells: {
+             when: <span className="mono" style={{ fontSize: 11, color: colors.dim }}>{formatWhen(e.startedAt)}</span>,
+             task: (
+-              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+-                <span className="mono" style={{ color: colors.coral }}>{e.taskCode}</span>
+-                <span style={{ fontWeight: 600 }}>{e.taskTitle}</span>
+-              </span>
++              <div>
++                <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
++                  <span className="mono" style={{ color: colors.coral }}>{e.taskCode}</span>
++                  <span style={{ fontWeight: 600 }}>{e.taskTitle}</span>
++                </span>
++                {e.note && <div style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>{e.note}</div>}
++              </div>
+             ),
+             person: <span style={{ color: colors.muted, fontSize: 13 }}>{e.memberName}</span>,
+             minutes: <span className="mono">{formatDuration(e.minutes)}</span>,
+diff --git a/apps/web/src/features/time-entries/components/YesterdayTimeline.tsx b/apps/web/src/features/time-entries/components/YesterdayTimeline.tsx
+new file mode 100644
+index 0000000..bc8c390
+--- /dev/null
++++ b/apps/web/src/features/time-entries/components/YesterdayTimeline.tsx
+@@ -0,0 +1,32 @@
++import { useTranslation } from "react-i18next";
++import { Panel } from "../../../components/Panel";
++import { useDayEntries } from "../api/use-today-entries";
++import { EntriesTimeline } from "./EntriesTimeline";
++import { formatMinutes } from "../../../lib/format-minutes";
++
++const pad = (n: number) => String(n).padStart(2, "0");
++const round2 = (n: number) => Math.round(n * 100) / 100;
++
++function yesterday(): Date {
++  const d = new Date();
++  d.setDate(d.getDate() - 1);
++  return d;
++}
++
++const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
++
++export function YesterdayTimeline() {
++  const { t, i18n } = useTranslation();
++  const day = yesterday();
++  const { data: entries = [] } = useDayEntries(isoDate(day));
++  const minutes = entries.reduce((s, e) => s + e.minutes, 0);
++  const cost = round2(entries.reduce((s, e) => s + e.cost, 0));
++  const ai = round2(entries.reduce((s, e) => s + e.aiCost, 0));
++  const date = day.toLocaleDateString(i18n.language, { weekday: "short", day: "2-digit", month: "2-digit" });
++
++  return (
++    <Panel title={t("tracker.yesterdayPanel", { date, time: formatMinutes(minutes), cost, ai })}>
++      <EntriesTimeline entries={entries} emptyLabel={t("tracker.emptyYesterday")} />
++    </Panel>
++  );
++}
+diff --git a/apps/web/src/i18n/locales/en.json b/apps/web/src/i18n/locales/en.json
+index f4b7258..3f37a52 100644
+--- a/apps/web/src/i18n/locales/en.json
++++ b/apps/web/src/i18n/locales/en.json
+@@ -38,7 +38,10 @@
+     "editModel": "Edit {{model}}",
+     "deleteModel": "Delete {{model}}",
+     "budget": "Budget",
+-    "dailyTarget": "Daily cost target"
++    "dailyTarget": "Daily cost target",
++    "myRate": "My hourly rate",
++    "myRateLabel": "hourly rate of {{name}}",
++    "myRateHint": "Your cost as a specialist. Applies to the ▶ timer and to manual time entries; existing entries keep the rate they were logged with."
+   },
+   "projects": {
+     "breadcrumb": "/ projects",
+@@ -90,6 +93,15 @@
+       "colTask": "Task",
+       "colReal": "Real",
+       "colCost": "Cost",
++      "colStatus": "Status",
++      "status": {
++        "todo": "to do",
++        "in_progress": "agent working",
++        "review": "review",
++        "waiting": "waiting for you",
++        "hold": "on hold",
++        "done": "done"
++      },
+       "emptyTasks": "No tasks yet.",
+       "backLink": "← Projects"
+     },
+@@ -149,7 +161,18 @@
+     "csvAriaLabel": "Export CSV",
+     "summaryCardTitle": "Total summary",
+     "summaryMeta": "{{count}} people · {{hours}}h · ${{cost}}",
+-    "comingSoon": "PDF/invoice · coming soon"
++    "comingSoon": "PDF/invoice · coming soon",
++    "projectFilterLabel": "PROJECT",
++    "allProjects": "All projects",
++    "tileCostSplit": "human ${{human}} · AI ${{ai}}",
++    "dailyPanelTitle": "By day · last 30 days",
++    "colDay": "Day · tasks",
++    "colHuman": "Human",
++    "colAgent": "Agent",
++    "colWait": "Waiting",
++    "colTotal": "Total",
++    "colTimeCost": "Time $",
++    "dailyEmpty": "No entries in the last 30 days."
+   },
+   "tracker": {
+     "breadcrumb": "/ time · today",
+@@ -178,7 +201,15 @@
+     "modalMinutesLabel": "MINUTES",
+     "modalMinutesAriaLabel": "Minutes",
+     "addTimeAria": "Add time",
+-    "addTimeButton": "+ time"
++    "addTimeButton": "+ time",
++    "colWho": "Who",
++    "origin": {
++      "manual": "human · manual",
++      "timer": "human · timer",
++      "mcp": "auto · mcp"
++    },
++    "yesterdayPanel": "Yesterday · {{date}} · {{time}} · time ${{cost}} · AI ${{ai}}",
++    "emptyYesterday": "No entries yesterday."
+   },
+   "documents": {
+     "breadcrumb": "/ documents",
+diff --git a/apps/web/src/i18n/locales/es.json b/apps/web/src/i18n/locales/es.json
+index ba64232..dd8a5ce 100644
+--- a/apps/web/src/i18n/locales/es.json
++++ b/apps/web/src/i18n/locales/es.json
+@@ -38,7 +38,10 @@
+     "editModel": "Editar {{model}}",
+     "deleteModel": "Borrar {{model}}",
+     "budget": "Presupuesto",
+-    "dailyTarget": "Objetivo diario de costo"
++    "dailyTarget": "Objetivo diario de costo",
++    "myRate": "Mi tarifa por hora",
++    "myRateLabel": "tarifa por hora de {{name}}",
++    "myRateHint": "Tu costo como especialista. Se aplica al timer ▶ y a las entradas manuales; las entradas existentes conservan su tarifa."
+   },
+   "projects": {
+     "breadcrumb": "/ proyectos",
+@@ -90,6 +93,15 @@
+       "colTask": "Tarea",
+       "colReal": "Real",
+       "colCost": "Costo",
++      "colStatus": "Estado",
++      "status": {
++        "todo": "por hacer",
++        "in_progress": "agente trabajando",
++        "review": "revisión",
++        "waiting": "esperando respuesta",
++        "hold": "en pausa",
++        "done": "terminada"
++      },
+       "emptyTasks": "Sin tareas aún.",
+       "backLink": "← Proyectos"
+     },
+@@ -149,7 +161,18 @@
+     "csvAriaLabel": "Exportar CSV",
+     "summaryCardTitle": "Resumen total",
+     "summaryMeta": "{{count}} personas · {{hours}}h · ${{cost}}",
+-    "comingSoon": "PDF/factura · próximamente"
++    "comingSoon": "PDF/factura · próximamente",
++    "projectFilterLabel": "PROYECTO",
++    "allProjects": "Todos los proyectos",
++    "tileCostSplit": "humano ${{human}} · IA ${{ai}}",
++    "dailyPanelTitle": "Por día · últimos 30 días",
++    "colDay": "Día · tareas",
++    "colHuman": "Humano",
++    "colAgent": "Agente",
++    "colWait": "Espera",
++    "colTotal": "Total",
++    "colTimeCost": "Tiempo $",
++    "dailyEmpty": "Sin entradas en los últimos 30 días."
+   },
+   "tracker": {
+     "breadcrumb": "/ tiempo · hoy",
+@@ -178,7 +201,15 @@
+     "modalMinutesLabel": "MINUTOS",
+     "modalMinutesAriaLabel": "Minutos",
+     "addTimeAria": "Agregar tiempo",
+-    "addTimeButton": "+ tiempo"
++    "addTimeButton": "+ tiempo",
++    "colWho": "Quién",
++    "origin": {
++      "manual": "humano · manual",
++      "timer": "humano · timer",
++      "mcp": "auto · mcp"
++    },
++    "yesterdayPanel": "Ayer · {{date}} · {{time}} · tiempo ${{cost}} · IA ${{ai}}",
++    "emptyYesterday": "Sin entradas ayer."
+   },
+   "documents": {
+     "breadcrumb": "/ documentos",
+diff --git a/apps/web/src/lib/format-minutes.ts b/apps/web/src/lib/format-minutes.ts
+new file mode 100644
+index 0000000..b957f46
+--- /dev/null
++++ b/apps/web/src/lib/format-minutes.ts
+@@ -0,0 +1,6 @@
++export function formatMinutes(minutes: number): string {
++  if (minutes === 0) return "—";
++  const h = Math.floor(minutes / 60);
++  const m = minutes % 60;
++  return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
++}
+diff --git a/apps/web/src/screens/ProjectDetail.tsx b/apps/web/src/screens/ProjectDetail.tsx
+index e6e9026..306919e 100644
+--- a/apps/web/src/screens/ProjectDetail.tsx
++++ b/apps/web/src/screens/ProjectDetail.tsx
+@@ -5,6 +5,7 @@ import { Chrome } from "../components/Chrome";
+ import { Panel } from "../components/Panel";
+ import { Avatar } from "../components/Avatar";
+ import { DataTable } from "../components/DataTable";
++import { Tag } from "../components/Tag";
+ import { useProject } from "../features/projects/api/use-projects";
+ import { useTasks, useCreateTask } from "../features/tasks/api/use-tasks";
+ import { useProjectCost } from "../features/reporting/api/use-reporting";
+@@ -19,6 +20,15 @@ import { colors } from "../theme/tokens";
+ const TABS = ["resumen", "tareas", "tiempo", "costos", "equipo", "documentos"] as const;
+ type Tab = (typeof TABS)[number];
+ 
++const STATUS_COLORS: Record<string, string> = {
++  in_progress: colors.blue,
++  waiting: colors.amber,
++  hold: colors.dim,
++  review: colors.amber,
++  done: colors.green,
++  todo: colors.muted,
++};
++
+ export function ProjectDetail() {
+   const { t } = useTranslation();
+   const { id = "" } = useParams();
+@@ -44,9 +54,9 @@ export function ProjectDetail() {
+   return (
+     <Chrome breadcrumb={t("projects.detail.breadcrumb", { name: project?.name ?? id })}>
+       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+-        <Avatar initials="HE" index={0} size={56} />
++        <Avatar initials={(project?.name ?? "").slice(0, 2).toUpperCase()} index={0} size={56} />
+         <div>
+-          <h1 style={{ fontSize: 24, fontWeight: 700 }}>{project ? `${project.name} · Plataforma fintech` : "—"}</h1>
++          <h1 style={{ fontSize: 24, fontWeight: 700 }}>{project ? project.name : "—"}</h1>
+           <div className="mono" style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>
+             {t("projects.detail.clientMeta", { contract: contract.toLocaleString("en-US") })}
+           </div>
+@@ -132,8 +142,9 @@ export function ProjectDetail() {
+         </div>
+         <DataTable
+           columns={[
+-            { key: "code", label: "ID", width: 80 },
++            { key: "code", label: "ID", width: 120 },
+             { key: "title", label: t("projects.detail.colTask") },
++            { key: "status", label: t("projects.detail.colStatus"), width: 130 },
+             { key: "real", label: t("projects.detail.colReal"), width: 100, align: "right" },
+             { key: "cost", label: t("projects.detail.colCost"), width: 90, align: "right" },
+             { key: "action", label: "", width: 110, align: "right" },
+@@ -142,7 +153,14 @@ export function ProjectDetail() {
+             id: task.id,
+             cells: {
+               code: <span className="mono" style={{ color: colors.coral }}>{task.code}</span>,
+-              title: task.title,
++              title: (
++                <div>
++                  <div>{task.title}</div>
++                  {task.summary && <div style={{ fontSize: 12, color: colors.muted, marginTop: 4 }}>{task.summary}</div>}
++                  {task.phase && <div className="mono" style={{ fontSize: 11, color: colors.dim, marginTop: 2 }}>{task.phase}</div>}
++                </div>
++              ),
++              status: <Tag label={t(`projects.detail.status.${task.status}`, { defaultValue: task.status })} color={STATUS_COLORS[task.status]} />,
+               real: <TaskRealCell taskId={task.id} />,
+               cost: <TaskCostCell taskId={task.id} />,
+               action: <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}><StartTimerButton taskId={task.id} taskCode={task.code} /><AddTimeButton taskId={task.id} projectId={id} /></div>,
+diff --git a/apps/web/src/screens/Reports.tsx b/apps/web/src/screens/Reports.tsx
+index 0fd8245..0092264 100644
+--- a/apps/web/src/screens/Reports.tsx
++++ b/apps/web/src/screens/Reports.tsx
+@@ -1,3 +1,4 @@
++import { useState } from "react";
+ import { useTranslation } from "react-i18next";
+ import { Chrome } from "../components/Chrome";
+ import { Panel } from "../components/Panel";
+@@ -5,16 +6,26 @@ import { TileRow } from "../components/TileRow";
+ import { StackedBars } from "../components/StackedBars";
+ import { DataTable } from "../components/DataTable";
+ import { useCostByPerson, useWeeklyCost } from "../features/reporting/api/use-reporting";
++import { useProjects } from "../features/projects/api/use-projects";
++import { DailyReportPanel } from "../features/reporting/components/DailyReportPanel";
++import { formatMinutes } from "../lib/format-minutes";
+ import { colors } from "../theme/tokens";
+ 
++const round2 = (n: number): number => Math.round(n * 100) / 100;
++
+ export function Reports() {
+   const { t } = useTranslation();
+-  const { data: people = [] } = useCostByPerson();
+-  const { data: weekly = [] } = useWeeklyCost();
+-  const totalHuman = people.reduce((s, p) => s + p.human, 0);
++  const [projectId, setProjectId] = useState("");
++  const { data: projects = [] } = useProjects();
++  const { data: allPeople = [] } = useCostByPerson(projectId || undefined);
++  const { data: weekly = [] } = useWeeklyCost(projectId || undefined);
++  const people = allPeople.filter((p) => p.minutes > 0);
++  const totalCost = round2(people.reduce((s, p) => s + p.total, 0));
++  const totalAi = round2(people.reduce((s, p) => s + p.ai, 0));
++  const totalHuman = round2(people.reduce((s, p) => s + p.human, 0));
+   const totalMinutes = people.reduce((s, p) => s + p.minutes, 0);
+   const totalHours = Math.round(totalMinutes / 60);
+-  const avgRate = totalHours > 0 ? (totalHuman / totalHours).toFixed(1) : "0";
++  const avgRate = totalMinutes > 0 ? ((totalCost * 60) / totalMinutes).toFixed(1) : "0";
+ 
+   const exportCsv = () => {
+     const header = "persona,minutos,horas,ia_usd,costo_usd";
+@@ -32,16 +43,30 @@ export function Reports() {
+   return (
+     <Chrome breadcrumb={t("reports.breadcrumb")}>
+       <h1 style={{ fontSize: 26, fontWeight: 700, marginBottom: 4 }}>{t("reports.title")}</h1>
+-      <div className="mono" style={{ fontSize: 12, color: colors.muted, marginBottom: 20 }}>
++      <div className="mono" style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>
+         {t("reports.subtitle")}
+       </div>
++      <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
++        <span className="mono" style={{ fontSize: 11, color: colors.muted, letterSpacing: 1 }}>{t("reports.projectFilterLabel")}</span>
++        <select
++          value={projectId}
++          onChange={(e) => setProjectId(e.target.value)}
++          aria-label={t("reports.projectFilterLabel")}
++          style={{ background: colors.surface2, border: `1px solid ${colors.border}`, color: colors.text, borderRadius: 8, padding: "8px 10px", minWidth: 260 }}
++        >
++          <option value="">{t("reports.allProjects")}</option>
++          {projects.map((p) => (
++            <option key={p.id} value={p.id}>{p.name}</option>
++          ))}
++        </select>
++      </label>
+       <div style={{ marginBottom: 16 }}>
+         <TileRow
+           columns={5}
+           tiles={[
+-            { label: t("reports.tileHorasLabel"), value: `${totalHours}h` },
+-            { label: t("reports.tileCostoTotalLabel"), value: `$${Math.round(totalHuman)}` },
+-            { label: t("reports.colIa"), value: "$0", sub: t("reports.tileViaMcp"), accent: colors.blue },
++            { label: t("reports.tileHorasLabel"), value: formatMinutes(totalMinutes) },
++            { label: t("reports.tileCostoTotalLabel"), value: `$${totalCost}`, sub: t("reports.tileCostSplit", { human: totalHuman, ai: totalAi }) },
++            { label: t("reports.colIa"), value: `$${totalAi}`, sub: t("reports.tileViaMcp"), accent: colors.blue },
+             { label: t("reports.tileTasaLabel"), value: `$${avgRate}`, accent: colors.green },
+             { label: t("reports.tilePersonasLabel"), value: String(people.length), accent: colors.amber },
+           ]}
+@@ -67,7 +92,7 @@ export function Reports() {
+               id: p.memberId,
+               cells: {
+                 name: <span style={{ fontWeight: 600 }}>{p.name}</span>,
+-                hours: <span className="mono" style={{ color: colors.muted }}>{Math.floor(p.minutes / 60)}h</span>,
++                hours: <span className="mono" style={{ color: colors.muted }}>{formatMinutes(p.minutes)}</span>,
+                 ai: <span className="mono" style={{ color: colors.blue }}>${p.ai}</span>,
+                 cost: <span className="mono" style={{ fontWeight: 700 }}>${p.total}</span>,
+               },
+@@ -76,6 +101,9 @@ export function Reports() {
+           />
+         </Panel>
+       </div>
++      <div style={{ marginTop: 16 }}>
++        <DailyReportPanel projectId={projectId || undefined} />
++      </div>
+       <div style={{ marginTop: 16 }}>
+         <Panel title={t("reports.exportPanelTitle")}>
+           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+@@ -88,7 +116,7 @@ export function Reports() {
+             </div>
+             <div style={{ background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 18 }}>
+               <div style={{ fontWeight: 600 }}>{t("reports.summaryCardTitle")}</div>
+-              <div style={{ fontSize: 12, color: colors.muted, marginTop: 6 }}>{t("reports.summaryMeta", { count: people.length, hours: totalHours, cost: Math.round(totalHuman) })}</div>
++              <div style={{ fontSize: 12, color: colors.muted, marginTop: 6 }}>{t("reports.summaryMeta", { count: people.length, hours: totalHours, cost: totalCost })}</div>
+               <div className="mono" style={{ fontSize: 12, color: colors.dim, marginTop: 14 }}>{t("reports.comingSoon")}</div>
+             </div>
+           </div>
+diff --git a/apps/web/src/screens/Settings.tsx b/apps/web/src/screens/Settings.tsx
+index b710487..bf4276c 100644
+--- a/apps/web/src/screens/Settings.tsx
++++ b/apps/web/src/screens/Settings.tsx
+@@ -40,6 +40,7 @@ export function Settings() {
+   const { data: settings } = useWorkspaceSettings();
+   const updateSettings = useUpdateWorkspaceSettings();
+   const [section, setSection] = useState<Section>("members");
++  const owner = members.find((m) => m.role === "owner") ?? members[0];
+   const [model, setModel] = useState("");
+   const [inputPer1M, setInputPer1M] = useState("");
+   const [outputPer1M, setOutputPer1M] = useState("");
+@@ -143,6 +144,17 @@ export function Settings() {
+                   ))}
+                 </div>
+               </Panel>
++              {owner && (
++                <Panel title={t("settings.myRate")}>
++                  <EditableRate
++                    label={t("settings.myRateLabel", { name: owner.name })}
++                    value={owner.ratePerHour}
++                    saving={updateMember.isPending && updateMember.variables?.id === owner.id}
++                    onSave={(ratePerHour) => updateMember.mutate({ id: owner.id, ratePerHour })}
++                  />
++                  <p style={{ color: colors.muted, fontSize: 12, marginTop: 8 }}>{t("settings.myRateHint")}</p>
++                </Panel>
++              )}
+               <Panel title={t("settings.budget")}>
+                 <EditableRate
+                   label={t("settings.dailyTarget")}
+diff --git a/apps/web/src/screens/Tracker.tsx b/apps/web/src/screens/Tracker.tsx
+index b207476..2adba29 100644
+--- a/apps/web/src/screens/Tracker.tsx
++++ b/apps/web/src/screens/Tracker.tsx
+@@ -2,9 +2,9 @@ import { useTranslation } from "react-i18next";
+ import { Chrome } from "../components/Chrome";
+ import { Panel } from "../components/Panel";
+ import { TileRow } from "../components/TileRow";
+-import { DataTable } from "../components/DataTable";
+-import { Tag } from "../components/Tag";
+ import { useTodayEntries } from "../features/time-entries/api/use-today-entries";
++import { EntriesTimeline } from "../features/time-entries/components/EntriesTimeline";
++import { YesterdayTimeline } from "../features/time-entries/components/YesterdayTimeline";
+ import { useTodaySummary } from "../features/reporting/api/use-today";
+ import { colors } from "../theme/tokens";
+ 
+@@ -33,29 +33,13 @@ export function Tracker() {
+           ]}
+         />
+       </div>
+-      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16 }}>
+-        <Panel title={t("tracker.timelinePanel")}>
+-          <DataTable
+-            columns={[
+-              { key: "time", label: t("tracker.colHora"), width: 70 },
+-              { key: "origin", label: t("tracker.colOrigen"), width: 90 },
+-              { key: "task", label: t("tracker.colTarea") },
+-              { key: "dur", label: t("tracker.colDuracion"), width: 100, align: "right" },
+-              { key: "cost", label: t("tracker.colCosto"), width: 80, align: "right" },
+-            ]}
+-            rows={entries.map((e) => ({
+-              id: e.id,
+-              cells: {
+-                time: <span className="mono" style={{ color: colors.dim }}>{e.time}</span>,
+-                origin: <Tag label={e.origin} color={e.origin === "mcp" ? colors.blue : colors.muted} />,
+-                task: <span style={{ fontWeight: 500 }}>{e.taskCode} · {e.taskTitle}</span>,
+-                dur: <span className="mono" style={{ color: colors.muted }}>{hm(e.minutes)}</span>,
+-                cost: <span className="mono" style={{ fontWeight: 700 }}>${e.cost}</span>,
+-              },
+-            }))}
+-            emptyLabel={t("tracker.emptyEntries")}
+-          />
+-        </Panel>
++      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>
++        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
++          <Panel title={t("tracker.timelinePanel")}>
++            <EntriesTimeline entries={entries} emptyLabel={t("tracker.emptyEntries")} />
++          </Panel>
++          <YesterdayTimeline />
++        </div>
+         <Panel title={t("tracker.goalPanel")}>
+           <div className="mono" style={{ fontSize: 28, fontWeight: 700 }}>{today ? hm(today.trackedMinutes) : "—"} / 8h</div>
+           <div style={{ height: 8, background: colors.surface2, borderRadius: 4, marginTop: 12 }}>
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index c61a2d0..2a69aae 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,2 +1,3 @@
+ export * from "./types";
+ export * from "./cost";
++export * from "./time";
+diff --git a/packages/shared/src/time.test.ts b/packages/shared/src/time.test.ts
+new file mode 100644
+index 0000000..2550c5e
+--- /dev/null
++++ b/packages/shared/src/time.test.ts
+@@ -0,0 +1,21 @@
++import { describe, expect, it } from "vitest";
++import { localDayBounds, localHourMinute } from "./time";
++
++describe("localHourMinute", () => {
++  it("formats local hours and minutes with leading zeros", () => {
++    expect(localHourMinute(new Date(2026, 9, 24, 9, 5))).toBe("09:05");
++  });
++});
++
++describe("localDayBounds", () => {
++  it("returns local midnight to next local midnight", () => {
++    const bounds = localDayBounds("2026-10-24");
++    expect(bounds?.from).toEqual(new Date(2026, 9, 24));
++    expect(bounds?.to).toEqual(new Date(2026, 9, 25));
++  });
++
++  it("rejects malformed or impossible dates", () => {
++    expect(localDayBounds("24.10.2026")).toBeNull();
++    expect(localDayBounds("2026-02-30")).toBeNull();
++  });
++});
+diff --git a/packages/shared/src/time.ts b/packages/shared/src/time.ts
+new file mode 100644
+index 0000000..1f0d850
+--- /dev/null
++++ b/packages/shared/src/time.ts
+@@ -0,0 +1,14 @@
++const pad = (n: number): string => String(n).padStart(2, "0");
++
++export function localHourMinute(date: Date): string {
++  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
++}
++
++export function localDayBounds(isoDate: string): { from: Date; to: Date } | null {
++  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
++  if (!match) return null;
++  const [y, m, d] = match.slice(1).map(Number);
++  const from = new Date(y, m - 1, d);
++  if (from.getMonth() !== m - 1 || from.getDate() !== d) return null;
++  return { from, to: new Date(y, m - 1, d + 1) };
++}
+diff --git a/packages/shared/src/types.ts b/packages/shared/src/types.ts
+index b5f53ed..8d20aa5 100644
+--- a/packages/shared/src/types.ts
++++ b/packages/shared/src/types.ts
+@@ -27,7 +27,8 @@ export interface Task {
+   code: string; // e.g. "T-142"
+   title: string;
+   phase: string | null; // optional lifecycle label
+-  status: "todo" | "in_progress" | "review" | "done";
++  summary: string | null;
++  status: "todo" | "in_progress" | "review" | "waiting" | "hold" | "done";
+   estimateMinutes: number | null;
+   createdAt: string;
+ }
+@@ -81,6 +82,25 @@ export interface WeeklyCost {
+   ai: number;
+ }
+ 
++export interface DailyTask {
++  taskId: string;
++  code: string;
++  title: string;
++  project: string;
++  minutes: number;
++}
++
++export interface DailyReport {
++  date: string; // local YYYY-MM-DD
++  agentMinutes: number;
++  waitMinutes: number;
++  humanMinutes: number;
++  totalMinutes: number;
++  timeCost: number;
++  aiCost: number;
++  tasks: DailyTask[];
++}
++
+ export interface NotificationRule {
+   id: string;
+   event: string;

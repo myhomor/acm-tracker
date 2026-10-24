@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "PermissionRequest": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "PostToolUseFailure": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ],
+    "PermissionDenied": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "node /ABSOLUTE/PATH/TO/REPO/hooks/acm-hook.mjs", "timeout": 15 }] }
+    ]
+  }
+}
