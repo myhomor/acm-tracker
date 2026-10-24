@@ -1,0 +1,12 @@
+apiVersion: v2
+name: acm-tracker
+description: Self-hosted time + cost tracker (human time + real AI cost). Single-origin web+api image.
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/harrinson-gutierrez/acm-tracker
+sources:
+  - https://github.com/harrinson-gutierrez/acm-tracker
+maintainers:
+  - name: Harrinson Gutierrez Coronado
+    email: hgutieco@gmail.com

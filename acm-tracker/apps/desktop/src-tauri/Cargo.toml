@@ -1,0 +1,23 @@
+[package]
+name = "acm-tracker-desktop"
+version = "0.3.0"
+description = "ACM-TRACKER desktop app"
+authors = ["Harrinson Gutierrez Coronado <hgutieco@gmail.com>"]
+license = "AGPL-3.0-only"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+dunce = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

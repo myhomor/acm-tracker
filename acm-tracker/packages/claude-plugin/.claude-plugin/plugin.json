@@ -1,0 +1,12 @@
+{
+  "name": "acm-tracker",
+  "displayName": "ACM-TRACKER",
+  "description": "Connect your agent to ACM-TRACKER: auto-report time and AI cost via the report_work MCP tool.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Harrinson Gutierrez"
+  },
+  "homepage": "https://github.com/harrinson-gutierrez/acm-tracker",
+  "license": "AGPL-3.0-only",
+  "keywords": ["time-tracking", "ai-cost", "mcp", "acm-tracker"]
+}

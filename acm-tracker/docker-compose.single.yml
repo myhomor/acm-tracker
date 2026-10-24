@@ -1,0 +1,13 @@
+services:
+  acm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/harrinson-gutierrez/acm-tracker:latest
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - acm-data:/data
+
+volumes:
+  acm-data:

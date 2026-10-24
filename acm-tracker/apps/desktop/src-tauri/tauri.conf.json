@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ACM-TRACKER",
+  "version": "0.3.0",
+  "identifier": "com.acmtracker.desktop",
+  "build": {
+    "frontendDist": "../shell"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "payload/": "payload/"
+    },
+    "longDescription": "ACM-TRACKER desktop app: local time and cost tracking with a bundled NestJS API sidecar and SQLite stored in the OS app-data directory.",
+    "shortDescription": "ACM-TRACKER desktop app",
+    "category": "Productivity",
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
+  }
+}

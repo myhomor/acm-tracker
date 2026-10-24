@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "acm-tracker": {
+      "command": "node",
+      "args": ["./packages/mcp/dist/index.js"],
+      "env": {
+        "ACM_API_URL": "http://localhost:5188",
+        "ACM_OWNER_EMAIL": "owner@acm.local"
+      }
+    }
+  }
+}

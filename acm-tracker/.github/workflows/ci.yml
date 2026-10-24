@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-test-e2e:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: acm
+          POSTGRES_PASSWORD: acm
+          POSTGRES_DB: acm_tracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U acm -d acm_tracker"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_BACKEND: postgres
+      DATABASE_URL: postgresql://acm:acm@localhost:5432/acm_tracker?schema=public
+      OWNER_NAME: "Harry G."
+      OWNER_EMAIL: owner@acm.local
+      OWNER_RATE_PER_HOUR: "45"
+      VITE_API_URL: http://localhost:4000/api
+      CORS_ORIGIN: http://localhost:5173
+      API_PORT: "4000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build shared
+        run: pnpm --filter @acm/shared build
+
+      - name: Unit tests (shared)
+        run: pnpm --filter @acm/shared test
+
+      - name: Prisma generate
+        run: pnpm --filter @acm/api exec prisma generate
+
+      - name: Unit tests (api)
+        run: pnpm --filter @acm/api test
+
+      - name: Build api
+        run: pnpm --filter @acm/api build
+
+      - name: Build web
+        run: pnpm --filter @acm/web build
+
+      - name: Migrate + seed database
+        run: |
+          pnpm --filter @acm/api exec prisma migrate deploy
+          pnpm --filter @acm/api exec ts-node prisma/seed.ts
+
+      - name: Start API
+        run: |
+          node apps/api/dist/src/main.js &
+          npx wait-on http://localhost:4000/api/projects --timeout 60000
+
+      - name: Serve web build
+        run: |
+          pnpm --filter @acm/web exec vite preview --port 5173 --host &
+          npx wait-on http://localhost:5173 --timeout 60000
+
+      - name: Install Playwright browser
+        run: pnpm --filter @acm/web exec playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: pnpm --filter @acm/web e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

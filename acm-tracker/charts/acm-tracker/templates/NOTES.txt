@@ -1,0 +1,18 @@
+ACM-TRACKER is deploying ({{ .Values.db.backend }} backend).
+
+{{- if .Values.ingress.enabled }}
+URL:  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else if eq .Values.service.type "LoadBalancer" }}
+Get the external IP:
+  kubectl get svc -w {{ include "acm-tracker.fullname" . }}
+{{- else }}
+Port-forward to reach it locally:
+  kubectl port-forward svc/{{ include "acm-tracker.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080/
+{{- end }}
+
+{{- if eq .Values.db.backend "sqlite" }}
+
+Note: sqlite backend stores data on a single PersistentVolume — keep replicaCount at 1.
+For multi-replica / HA, set db.backend=postgres and provide db.postgres.url (or urlSecret).
+{{- end }}

@@ -1,0 +1,16 @@
+{
+  "name": "@acm/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "payload": "node scripts/prepare-payload.mjs",
+    "build:deps": "pnpm --filter @acm/shared build && pnpm --filter @acm/web build && pnpm --filter @acm/mcp build && pnpm --filter @acm/api prisma:generate:all && pnpm --filter @acm/api build",
+    "prepare:payload": "pnpm build:deps && pnpm payload",
+    "dev": "pnpm prepare:payload && tauri dev",
+    "build": "pnpm prepare:payload && tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

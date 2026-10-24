@@ -1,0 +1,12 @@
+{
+  "name": "acm-tracker",
+  "owner": {
+    "name": "Harrinson Gutierrez"
+  },
+  "plugins": [
+    {
+      "name": "acm-tracker",
+      "source": "./packages/claude-plugin"
+    }
+  ]
+}
