@@ -4,7 +4,7 @@ This directory is a modified copy of [ACM-TRACKER](https://github.com/harrinson-
 by Harrinson Gutierrez Coronado, licensed under AGPL-3.0 (see `LICENSE`).
 
 - Base: upstream commit `0e95c8a` (main, version 0.3.0, 2026-06-12).
-- Modified: 2026-10-24 — 2026-10-25.
+- Modified: 2026-10-24 — 2026-10-27.
 
 ## What was changed
 
@@ -21,4 +21,7 @@ by Harrinson Gutierrez Coronado, licensed under AGPL-3.0 (see `LICENSE`).
 - **Daily report** `GET /reports/daily` (human / agent / waiting minutes per day with tasks), project filter
   for the weekly and per-person reports, project selector and a "By day" panel on the Reports screen.
 - Removed the hard-coded "Plataforma fintech" subtitle from the project header.
+- **Waiting kept out of worked time**: entries of the hook's "waiting for reply" member (role `system`) are excluded from
+  task, project, today, team and report hour totals and returned separately as `waitMinutes`; `report-work` accepts an
+  optional `startedAt` so agent and waiting entries are placed at their start time.
 - Tests updated for the new fields; new tests for project AI cost, daily grouping and local date helpers.

@@ -16,6 +16,7 @@ export interface RecordWorkInput {
   minutes: number;
   ratePerHourSnapshot: number;
   note: string | null;
+  startedAt?: Date;
   aiRuns: AiRunInput[];
 }
 

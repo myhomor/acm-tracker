@@ -9,8 +9,16 @@ function hm(min: number): string {
 }
 
 export function TaskRealCell({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
   const { data: cost } = useTaskCost(taskId);
-  return <span className="mono" style={{ color: colors.muted }}>{cost ? hm(cost.minutes) : "—"}</span>;
+  return (
+    <div>
+      <span className="mono" style={{ color: colors.muted }}>{cost ? hm(cost.minutes) : "—"}</span>
+      {cost && cost.waitMinutes > 0 && (
+        <div className="mono" style={{ fontSize: 11, color: colors.amber, marginTop: 2 }}>{t("projects.detail.waited", { time: hm(cost.waitMinutes) })}</div>
+      )}
+    </div>
+  );
 }
 
 export function TaskCostCell({ taskId }: { taskId: string }) {

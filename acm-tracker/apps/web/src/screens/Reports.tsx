@@ -20,10 +20,12 @@ export function Reports() {
   const { data: allPeople = [] } = useCostByPerson(projectId || undefined);
   const { data: weekly = [] } = useWeeklyCost(projectId || undefined);
   const people = allPeople.filter((p) => p.minutes > 0);
+  const workers = people.filter((p) => p.kind !== "wait");
+  const waitMinutes = people.filter((p) => p.kind === "wait").reduce((s, p) => s + p.minutes, 0);
   const totalCost = round2(people.reduce((s, p) => s + p.total, 0));
   const totalAi = round2(people.reduce((s, p) => s + p.ai, 0));
   const totalHuman = round2(people.reduce((s, p) => s + p.human, 0));
-  const totalMinutes = people.reduce((s, p) => s + p.minutes, 0);
+  const totalMinutes = workers.reduce((s, p) => s + p.minutes, 0);
   const totalHours = Math.round(totalMinutes / 60);
   const avgRate = totalMinutes > 0 ? ((totalCost * 60) / totalMinutes).toFixed(1) : "0";
 
@@ -68,7 +70,7 @@ export function Reports() {
             { label: t("reports.tileCostoTotalLabel"), value: `$${totalCost}`, sub: t("reports.tileCostSplit", { human: totalHuman, ai: totalAi }) },
             { label: t("reports.colIa"), value: `$${totalAi}`, sub: t("reports.tileViaMcp"), accent: colors.blue },
             { label: t("reports.tileTasaLabel"), value: `$${avgRate}`, accent: colors.green },
-            { label: t("reports.tilePersonasLabel"), value: String(people.length), accent: colors.amber },
+            { label: t("reports.tileWaitLabel"), value: formatMinutes(waitMinutes), sub: t("reports.tileWaitSub"), accent: colors.amber },
           ]}
         />
       </div>
@@ -116,7 +118,7 @@ export function Reports() {
             </div>
             <div style={{ background: colors.surface2, border: `1px solid ${colors.border}`, borderRadius: 10, padding: 18 }}>
               <div style={{ fontWeight: 600 }}>{t("reports.summaryCardTitle")}</div>
-              <div style={{ fontSize: 12, color: colors.muted, marginTop: 6 }}>{t("reports.summaryMeta", { count: people.length, hours: totalHours, cost: totalCost })}</div>
+              <div style={{ fontSize: 12, color: colors.muted, marginTop: 6 }}>{t("reports.summaryMeta", { count: workers.length, hours: totalHours, cost: totalCost })}</div>
               <div className="mono" style={{ fontSize: 12, color: colors.dim, marginTop: 14 }}>{t("reports.comingSoon")}</div>
             </div>
           </div>

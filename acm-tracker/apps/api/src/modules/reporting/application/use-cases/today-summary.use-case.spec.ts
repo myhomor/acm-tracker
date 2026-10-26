@@ -12,7 +12,7 @@ import type { DailyEntryRow } from "../../domain/daily-report";
 
 class FakeAgg implements CostAggregationPort {
   async projectCost(): Promise<ProjectCostRow> {
-    return { human: 0, ai: 0, minutes: 0 };
+    return { human: 0, ai: 0, minutes: 0, waitMinutes: 0 };
   }
   async projectEstimate(): Promise<ProjectEstimateRow> {
     return { estimateHours: null, ratePerHour: null };
@@ -27,7 +27,7 @@ class FakeAgg implements CostAggregationPort {
     return [];
   }
   async todaySummary(): Promise<TodaySummary> {
-    return { trackedMinutes: 252, billableMinutes: 240, cost: 334, aiCost: 1.5, weekMinutes: 1200 };
+    return { trackedMinutes: 252, billableMinutes: 240, cost: 334, aiCost: 1.5, weekMinutes: 1200, waitMinutes: 90 };
   }
   async teamToday(): Promise<TeamTodayRow[]> {
     return [];
@@ -45,6 +45,6 @@ describe("TodaySummaryUseCase", () => {
       new Date("2026-06-07T00:00:00Z"),
       new Date("2026-06-02T00:00:00Z"),
     );
-    expect(r).toEqual({ trackedMinutes: 252, billableMinutes: 240, cost: 334, aiCost: 1.5, weekMinutes: 1200 });
+    expect(r).toEqual({ trackedMinutes: 252, billableMinutes: 240, cost: 334, aiCost: 1.5, weekMinutes: 1200, waitMinutes: 90 });
   });
 });

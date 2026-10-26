@@ -28,6 +28,9 @@ class FakeEntryRepo implements TimeEntryRepositoryPort {
   async findByTask(): Promise<TimeEntry[]> {
     return [];
   }
+  async waitingMemberIds(): Promise<string[]> {
+    return [];
+  }
   async findByProject(projectId: string): Promise<ProjectEntryView[]> {
     this.lastProjectId = projectId;
     return [entry];

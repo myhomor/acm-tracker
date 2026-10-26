@@ -1,4 +1,4 @@
-import type { TimeEntry } from "@acm/shared";
+import type { TimeEntry, WorkKind } from "@acm/shared";
 
 export const TIME_ENTRY_REPOSITORY = Symbol("TIME_ENTRY_REPOSITORY");
 
@@ -20,6 +20,7 @@ export interface TodayEntryView {
   taskCode: string;
   taskTitle: string;
   memberName: string;
+  kind: WorkKind;
   note: string | null;
   minutes: number;
   cost: number;
@@ -43,6 +44,7 @@ export interface ProjectEntryView {
 export interface TimeEntryRepositoryPort {
   create(data: CreateTimeEntryData): Promise<TimeEntry>;
   findByTask(taskId: string): Promise<TimeEntry[]>;
+  waitingMemberIds(): Promise<string[]>;
   findByProject(projectId: string): Promise<ProjectEntryView[]>;
   findToday(from: Date, to: Date): Promise<TodayEntryView[]>;
 }

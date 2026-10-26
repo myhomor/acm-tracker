@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { PersonCost, TimeEntry, WeeklyCost } from "@acm/shared";
-import { computeEntryCost } from "@acm/shared";
+import { WAIT_ROLE, computeEntryCost, workKindOfRole } from "@acm/shared";
 import { PrismaService } from "../../../../prisma/prisma.service";
 import {
   CostAggregationPort,
@@ -10,13 +10,12 @@ import {
   TeamTodayRow,
   TodaySummary,
 } from "../../domain/ports/cost-aggregation.port";
-import type { DailyEntryRow, WorkKind } from "../../domain/daily-report";
+import type { DailyEntryRow } from "../../domain/daily-report";
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
-// Roles of the service members created by the Claude Code tracking hook (hooks/config.json).
-const KIND_BY_ROLE: Record<string, WorkKind> = { agent: "agent", system: "wait" };
-const kindOfRole = (role: string): WorkKind => KIND_BY_ROLE[role] ?? "human";
+const isWaiting = (r: { member: { role: string } }): boolean => r.member.role === WAIT_ROLE;
+const NOT_WAITING = { member: { role: { not: WAIT_ROLE } } };
 
 function localDay(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -35,16 +34,18 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
   constructor(private readonly prisma: PrismaService) {}
 
   async projectCost(projectId: string): Promise<ProjectCostRow> {
-    const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId } }, include: { aiRuns: true } });
+    const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId } }, include: { aiRuns: true, member: true } });
     let human = 0;
     let ai = 0;
     let minutes = 0;
+    let waitMinutes = 0;
     for (const r of rows) {
       human += computeEntryCost(r as unknown as TimeEntry);
       ai += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
-      minutes += r.minutes;
+      if (isWaiting(r)) waitMinutes += r.minutes;
+      else minutes += r.minutes;
     }
-    return { human: round2(human), ai: round2(ai), minutes };
+    return { human: round2(human), ai: round2(ai), minutes, waitMinutes };
   }
 
   async projectEstimate(projectId: string): Promise<ProjectEstimateRow> {
@@ -71,7 +72,7 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
         ai += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
         minutes += r.minutes;
       }
-      result.push({ memberId: m.id, name: m.name, minutes, human: round2(human), ai: round2(ai), total: round2(human + ai) });
+      result.push({ memberId: m.id, name: m.name, kind: workKindOfRole(m.role), minutes, human: round2(human), ai: round2(ai), total: round2(human + ai) });
     }
     return result;
   }
@@ -101,7 +102,7 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
     });
     return rows.map((r) => ({
       day: localDay(r.startedAt),
-      kind: kindOfRole(r.member.role),
+      kind: workKindOfRole(r.member.role),
       minutes: r.minutes,
       timeCost: computeEntryCost(r as unknown as TimeEntry),
       aiCost: r.aiRuns.reduce((s, a) => s + a.costUsd, 0),
@@ -115,21 +116,26 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
   async todaySummary(from: Date, to: Date, weekFrom: Date): Promise<TodaySummary> {
     const rows = await this.prisma.timeEntry.findMany({
       where: { startedAt: { gte: from, lt: to } },
-      include: { aiRuns: true },
+      include: { aiRuns: true, member: true },
     });
     let cost = 0;
     let tracked = 0;
     let billable = 0;
     let aiCost = 0;
+    let waitMinutes = 0;
     for (const r of rows) {
       cost += computeEntryCost(r as unknown as TimeEntry);
+      aiCost += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
+      if (isWaiting(r)) {
+        waitMinutes += r.minutes;
+        continue;
+      }
       tracked += r.minutes;
       if (r.billable) billable += r.minutes;
-      aiCost += r.aiRuns.reduce((s, a) => s + a.costUsd, 0);
     }
     const week = await this.prisma.timeEntry.aggregate({
       _sum: { minutes: true },
-      where: { startedAt: { gte: weekFrom, lt: to } },
+      where: { startedAt: { gte: weekFrom, lt: to }, ...NOT_WAITING },
     });
     return {
       trackedMinutes: tracked,
@@ -137,6 +143,7 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
       cost: round2(cost),
       aiCost: round2(aiCost),
       weekMinutes: week._sum.minutes ?? 0,
+      waitMinutes,
     };
   }
 
@@ -145,10 +152,10 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
     let revenue = 0;
     let cost = 0;
     for (const p of projects) {
-      const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId: p.id } } });
+      const rows = await this.prisma.timeEntry.findMany({ where: { task: { projectId: p.id } }, include: { member: true } });
       let minutes = 0;
       for (const r of rows) {
-        minutes += r.minutes;
+        if (!isWaiting(r)) minutes += r.minutes;
         cost += computeEntryCost(r as unknown as TimeEntry);
       }
       revenue += (minutes / 60) * (p.ratePerHour as number);
@@ -157,7 +164,7 @@ export class PrismaCostAggregationRepository implements CostAggregationPort {
   }
 
   async teamToday(from: Date, to: Date): Promise<TeamTodayRow[]> {
-    const members = await this.prisma.member.findMany({ orderBy: { createdAt: "asc" } });
+    const members = await this.prisma.member.findMany({ where: { role: { not: WAIT_ROLE } }, orderBy: { createdAt: "asc" } });
     const out: TeamTodayRow[] = [];
     for (const m of members) {
       const rows = await this.prisma.timeEntry.findMany({ where: { memberId: m.id, startedAt: { gte: from, lt: to } } });

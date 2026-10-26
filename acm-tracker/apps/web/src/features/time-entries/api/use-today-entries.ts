@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { WorkKind } from "@acm/shared";
 import { apiClient } from "../../../lib/api-client";
 
 export interface TodayEntryView {
@@ -8,6 +9,7 @@ export interface TodayEntryView {
   taskCode: string;
   taskTitle: string;
   memberName: string;
+  kind: WorkKind;
   note: string | null;
   minutes: number;
   cost: number;

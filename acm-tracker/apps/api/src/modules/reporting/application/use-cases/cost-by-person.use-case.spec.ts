@@ -13,14 +13,14 @@ import type { DailyEntryRow } from "../../domain/daily-report";
 class FakeAgg implements CostAggregationPort {
   public lastProjectId: string | undefined = undefined;
   async projectCost(): Promise<ProjectCostRow> {
-    return { human: 0, ai: 0, minutes: 0 };
+    return { human: 0, ai: 0, minutes: 0, waitMinutes: 0 };
   }
   async projectEstimate(): Promise<ProjectEstimateRow> {
     return { estimateHours: null, ratePerHour: null };
   }
   async costByPerson(projectId?: string): Promise<PersonCost[]> {
     this.lastProjectId = projectId;
-    return [{ memberId: "m1", name: "Ada", minutes: 60, human: 50, ai: 0, total: 50 }];
+    return [{ memberId: "m1", name: "Ada", kind: "human", minutes: 60, human: 50, ai: 0, total: 50 }];
   }
   async weeklyCost(): Promise<WeeklyCost[]> {
     return [];
@@ -29,7 +29,7 @@ class FakeAgg implements CostAggregationPort {
     return [];
   }
   async todaySummary(): Promise<TodaySummary> {
-    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0 };
+    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0, waitMinutes: 0 };
   }
   async teamToday(): Promise<TeamTodayRow[]> {
     return [];
@@ -45,7 +45,7 @@ describe("CostByPersonUseCase", () => {
     const useCase = new CostByPersonUseCase(agg);
     const result = await useCase.execute();
     expect(agg.lastProjectId).toBeUndefined();
-    expect(result).toEqual([{ memberId: "m1", name: "Ada", minutes: 60, human: 50, ai: 0, total: 50 }]);
+    expect(result).toEqual([{ memberId: "m1", name: "Ada", kind: "human", minutes: 60, human: 50, ai: 0, total: 50 }]);
   });
 
   it("scopes aggregation to the given project", async () => {

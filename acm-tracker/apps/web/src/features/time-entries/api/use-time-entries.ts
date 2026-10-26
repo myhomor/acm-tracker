@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CostSummary, TimeEntry } from "@acm/shared";
+import type { TaskCostSummary, TimeEntry } from "@acm/shared";
 import { apiClient } from "../../../lib/api-client";
 
 export function useTaskCost(taskId: string) {
   return useQuery({
     queryKey: ["task-cost", taskId],
-    queryFn: () => apiClient.get<CostSummary>(`/time-entries/task/${taskId}/cost`),
+    queryFn: () => apiClient.get<TaskCostSummary>(`/time-entries/task/${taskId}/cost`),
     enabled: Boolean(taskId),
   });
 }

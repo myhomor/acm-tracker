@@ -379,7 +379,9 @@ function closeAgentTurn(state, entries, nowMs, transcriptPath, summary) {
   const minutes = Math.floor(total / 60);
   state.carry.agent = total - minutes * 60;
   state.agentSec = 0;
-  if (minutes > 0 || usage.length > 0) state.outbox.push({ kind: "agent", minutes, aiRuns: usage, note: summary ?? NOTES.agent });
+  const startedAt = state.turnStart ?? iso(nowMs - total * 1000);
+  state.turnStart = null;
+  if (minutes > 0 || usage.length > 0) state.outbox.push({ kind: "agent", minutes, startedAt, aiRuns: usage, note: summary ?? NOTES.agent });
   if (summary && summary !== state.summary) {
     state.summary = summary;
     patchTask(state, { summary });
@@ -416,6 +418,7 @@ function onPrompt(input, state, nowMs) {
   if (cmd.commandOnly) return block(applyStatusCommand(state, cmd, nowMs, notes).join(", ") || "команда принята");
   closeInterruptedTurn(state, entries, nowMs);
   closeGap(state, nowMs);
+  state.turnStart ??= iso(nowMs);
   setPhase(state, "working", nowMs);
   state.afterTurn = cmd.hold ? "hold" : cmd.done ? "done" : null;
   return notes.length ? { systemMessage: `ACM-трекер: ${notes.join(", ")}` } : null;
@@ -428,6 +431,7 @@ function onBackgroundResume(input, state, nowMs) {
   resolveIdentity(state, input, readJsonl(input.transcript_path));
   if (state.usageCursor === null) state.usageCursor = iso(nowMs);
   const gap = secsBetween(state.since, nowMs);
+  state.turnStart ??= state.phase === "done" ? state.since : iso(nowMs);
   if (state.phase === "done") state.agentSec += gap;
   else if (WAIT_PHASES.has(state.phase)) addTime(state, "wait", gap, state.since);
   state.gapExplicitSec = 0;
@@ -474,6 +478,7 @@ function onWaitStart(input, state, nowMs) {
 function onToolDone(input, state, nowMs) {
   if (state.untracked || !IDLE_PHASES.has(state.phase)) return null;
   if (state.phase === "waiting_turn") closeGap(state, nowMs);
+  else state.turnStart ??= iso(nowMs);
   setPhase(state, "working", nowMs);
   return null;
 }
@@ -486,7 +491,11 @@ function onStop(input, state, nowMs) {
   const blocks = turnBlocks(entries, state.phase === "waiting_turn" ? null : state.since);
   if (state.phase === "working") state.agentSec += secsBetween(state.since, nowMs);
   else if (state.phase === "waiting_turn") closeGap(state, nowMs);
-  else state.agentSec += (nowMs - (firstActivityAfter(entries, state.since) ?? nowMs)) / 1000;
+  else {
+    const start = firstActivityAfter(entries, state.since) ?? nowMs;
+    state.agentSec += (nowMs - start) / 1000;
+    state.turnStart ??= iso(start);
+  }
   closeAgentTurn(state, entries, nowMs, input.transcript_path, turnSummary(blocks));
   setPhase(state, state.afterTurn ?? (asksUser(blocks) ? "waiting" : "done"), nowMs);
   state.afterTurn = null;
@@ -498,6 +507,7 @@ function adoptRunningTurn(state, entries, nowMs) {
   const start = idx >= 0 ? Date.parse(entries[idx].timestamp) : nowMs;
   state.phase = "working";
   state.since = iso(start);
+  state.turnStart = iso(start);
   state.usageCursor = iso(start - 1);
 }
 
@@ -591,7 +601,14 @@ async function applyRecord(rec) {
     if (rec.kind === "manual") return await api("POST", "/time-entries", { taskId, minutes: rec.minutes, billable: true, note: rec.note, startedAt: rec.startedAt });
     const member = rec.kind === "agent" ? CONFIG.agentMember : CONFIG.waitMember;
     await ensureMember(ids, member, rec.kind === "agent" ? "agent" : "system");
-    return await api("POST", "/mcp/report-work", { taskId, memberEmail: member.email, minutes: rec.minutes, output: rec.note, aiRuns: rec.aiRuns ?? [] });
+    return await api("POST", "/mcp/report-work", {
+      taskId,
+      memberEmail: member.email,
+      minutes: rec.minutes,
+      output: rec.note,
+      aiRuns: rec.aiRuns ?? [],
+      ...(rec.startedAt ? { startedAt: rec.startedAt } : {}),
+    });
   } finally {
     saveIds(ids);
   }

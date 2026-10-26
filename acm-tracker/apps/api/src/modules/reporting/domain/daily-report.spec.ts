@@ -25,10 +25,20 @@ describe("groupByDay", () => {
       agentMinutes: 30,
       waitMinutes: 20,
       humanMinutes: 15,
-      totalMinutes: 65,
+      totalMinutes: 45,
       timeCost: 7.5,
       aiCost: 1.23,
     });
+  });
+
+  it("keeps waiting out of the day total and the task list", () => {
+    const [day] = groupByDay([
+      row({ kind: "wait", minutes: 354, taskId: "t9", taskCode: "S-9" }),
+      row({ kind: "agent", minutes: 22, taskId: "t1" }),
+    ]);
+    expect(day.totalMinutes).toBe(22);
+    expect(day.waitMinutes).toBe(354);
+    expect(day.tasks.map((t) => [t.code, t.minutes])).toEqual([["S-1", 22]]);
   });
 
   it("orders days newest first and tasks by time spent", () => {

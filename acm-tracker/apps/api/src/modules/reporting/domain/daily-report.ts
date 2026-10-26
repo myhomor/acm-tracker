@@ -1,6 +1,6 @@
-import type { DailyReport } from "@acm/shared";
+import type { DailyReport, WorkKind } from "@acm/shared";
 
-export type WorkKind = "agent" | "wait" | "human";
+export type { WorkKind };
 
 export interface DailyEntryRow {
   day: string;
@@ -30,9 +30,10 @@ function addTask(day: DailyReport, row: DailyEntryRow): void {
 
 function addRow(day: DailyReport, row: DailyEntryRow): void {
   day[MINUTES_BY_KIND[row.kind]] += row.minutes;
-  day.totalMinutes += row.minutes;
   day.timeCost += row.timeCost;
   day.aiCost += row.aiCost;
+  if (row.kind === "wait") return;
+  day.totalMinutes += row.minutes;
   addTask(day, row);
 }
 

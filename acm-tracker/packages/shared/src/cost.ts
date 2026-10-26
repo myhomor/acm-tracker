@@ -12,6 +12,10 @@ export interface CostSummary {
   minutes: number;
 }
 
+export interface TaskCostSummary extends CostSummary {
+  waitMinutes: number;
+}
+
 export function sumCost(entries: TimeEntry[]): CostSummary {
   const acc = entries.reduce(
     (a, e) => {

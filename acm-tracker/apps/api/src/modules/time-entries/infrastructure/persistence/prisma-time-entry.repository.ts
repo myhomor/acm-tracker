@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { TimeEntry } from "@acm/shared";
-import { computeEntryCost, localHourMinute } from "@acm/shared";
+import { WAIT_ROLE, computeEntryCost, localHourMinute, workKindOfRole } from "@acm/shared";
 import { PrismaService } from "../../../../prisma/prisma.service";
 import {
   CreateTimeEntryData,
@@ -25,6 +25,11 @@ export class PrismaTimeEntryRepository implements TimeEntryRepositoryPort {
       orderBy: { startedAt: "desc" },
     });
     return rows.map(toDomainTimeEntry);
+  }
+
+  async waitingMemberIds(): Promise<string[]> {
+    const rows = await this.prisma.member.findMany({ where: { role: WAIT_ROLE }, select: { id: true } });
+    return rows.map((r) => r.id);
   }
 
   async findByProject(projectId: string): Promise<ProjectEntryView[]> {
@@ -61,6 +66,7 @@ export class PrismaTimeEntryRepository implements TimeEntryRepositoryPort {
       taskCode: r.task.code,
       taskTitle: r.task.title,
       memberName: r.member.name,
+      kind: workKindOfRole(r.member.role),
       note: r.note,
       minutes: r.minutes,
       cost: computeEntryCost(r as unknown as TimeEntry),

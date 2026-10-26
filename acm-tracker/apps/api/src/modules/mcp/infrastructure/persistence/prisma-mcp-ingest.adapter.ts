@@ -40,7 +40,7 @@ export class PrismaMcpIngestAdapter implements McpIngestPort {
         billable: true,
         ratePerHourSnapshot: input.ratePerHourSnapshot,
         note: input.note,
-        startedAt: new Date(),
+        startedAt: input.startedAt ?? new Date(),
         aiRuns: {
           create: input.aiRuns.map((r) => ({
             agent: r.agent,

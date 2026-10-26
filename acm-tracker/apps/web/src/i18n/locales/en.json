@@ -103,7 +103,9 @@
         "done": "done"
       },
       "emptyTasks": "No tasks yet.",
-      "backLink": "← Projects"
+      "backLink": "← Projects",
+      "waited": "waited {{time}}",
+      "waitLabel": "WAITING"
     },
     "tabs": {
       "resumen": "Summary",
@@ -170,9 +172,11 @@
     "colHuman": "Human",
     "colAgent": "Agent",
     "colWait": "Waiting",
-    "colTotal": "Total",
+    "colTotal": "Worked",
     "colTimeCost": "Time $",
-    "dailyEmpty": "No entries in the last 30 days."
+    "dailyEmpty": "No entries in the last 30 days.",
+    "tileWaitLabel": "Waiting for you",
+    "tileWaitSub": "not counted in hours"
   },
   "tracker": {
     "breadcrumb": "/ time · today",
@@ -208,8 +212,9 @@
       "timer": "human · timer",
       "mcp": "auto · mcp"
     },
-    "yesterdayPanel": "Yesterday · {{date}} · {{time}} · time ${{cost}} · AI ${{ai}}",
-    "emptyYesterday": "No entries yesterday."
+    "yesterdayPanel": "Yesterday · {{date}} · worked {{time}} · waiting {{wait}} · time ${{cost}} · AI ${{ai}}",
+    "emptyYesterday": "No entries yesterday.",
+    "tileWaitLabel": "Waiting for you"
   },
   "documents": {
     "breadcrumb": "/ documents",

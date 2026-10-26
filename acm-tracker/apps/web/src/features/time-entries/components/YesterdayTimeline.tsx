@@ -19,13 +19,14 @@ export function YesterdayTimeline() {
   const { t, i18n } = useTranslation();
   const day = yesterday();
   const { data: entries = [] } = useDayEntries(isoDate(day));
-  const minutes = entries.reduce((s, e) => s + e.minutes, 0);
+  const minutes = entries.filter((e) => e.kind !== "wait").reduce((s, e) => s + e.minutes, 0);
+  const waiting = entries.filter((e) => e.kind === "wait").reduce((s, e) => s + e.minutes, 0);
   const cost = round2(entries.reduce((s, e) => s + e.cost, 0));
   const ai = round2(entries.reduce((s, e) => s + e.aiCost, 0));
   const date = day.toLocaleDateString(i18n.language, { weekday: "short", day: "2-digit", month: "2-digit" });
 
   return (
-    <Panel title={t("tracker.yesterdayPanel", { date, time: formatMinutes(minutes), cost, ai })}>
+    <Panel title={t("tracker.yesterdayPanel", { date, time: formatMinutes(minutes), wait: formatMinutes(waiting), cost, ai })}>
       <EntriesTimeline entries={entries} emptyLabel={t("tracker.emptyYesterday")} />
     </Panel>
   );

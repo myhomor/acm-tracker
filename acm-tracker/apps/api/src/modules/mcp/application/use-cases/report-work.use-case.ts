@@ -32,6 +32,7 @@ export class ReportWorkUseCase {
       minutes: dto.minutes,
       ratePerHourSnapshot: member.ratePerHour,
       note: dto.output ?? null,
+      startedAt: dto.startedAt ? new Date(dto.startedAt) : undefined,
       aiRuns,
     });
 

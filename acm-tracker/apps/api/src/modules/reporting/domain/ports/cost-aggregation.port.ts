@@ -7,6 +7,7 @@ export interface ProjectCostRow {
   human: number;
   ai: number;
   minutes: number;
+  waitMinutes: number;
 }
 
 export interface ProjectEstimateRow {
@@ -20,6 +21,7 @@ export interface TodaySummary {
   cost: number;
   aiCost: number;
   weekMinutes: number;
+  waitMinutes: number;
 }
 
 export interface MarginSummary {

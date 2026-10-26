@@ -7,6 +7,7 @@ interface ProjectCost {
   ai: number;
   total: number;
   minutes: number;
+  waitMinutes: number;
   estimateHours: number | null;
   projectRate: number | null;
   estimatedCost: number | null;

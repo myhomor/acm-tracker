@@ -12,7 +12,7 @@ import type { DailyEntryRow } from "../../domain/daily-report";
 
 class FakeAgg implements CostAggregationPort {
   async projectCost(): Promise<ProjectCostRow> {
-    return { human: 0, ai: 0, minutes: 0 };
+    return { human: 0, ai: 0, minutes: 0, waitMinutes: 0 };
   }
   async projectEstimate(): Promise<ProjectEstimateRow> {
     return { estimateHours: null, ratePerHour: null };
@@ -27,7 +27,7 @@ class FakeAgg implements CostAggregationPort {
     return [];
   }
   async todaySummary(): Promise<TodaySummary> {
-    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0 };
+    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0, waitMinutes: 0 };
   }
   async teamToday(): Promise<TeamTodayRow[]> {
     return [];

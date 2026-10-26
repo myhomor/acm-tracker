@@ -31,7 +31,7 @@ class FakeAgg implements CostAggregationPort {
     return [];
   }
   async todaySummary(): Promise<TodaySummary> {
-    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0 };
+    return { trackedMinutes: 0, billableMinutes: 0, cost: 0, aiCost: 0, weekMinutes: 0, waitMinutes: 0 };
   }
   async teamToday(): Promise<TeamTodayRow[]> {
     return [];
@@ -43,13 +43,14 @@ class FakeAgg implements CostAggregationPort {
 
 describe("ProjectCostBreakdownUseCase", () => {
   it("returns nulls for estimate and margin when the project has no rate", async () => {
-    const useCase = new ProjectCostBreakdownUseCase(new FakeAgg({ human: 1508, ai: 0, minutes: 2010 }));
+    const useCase = new ProjectCostBreakdownUseCase(new FakeAgg({ human: 1508, ai: 0, minutes: 2010, waitMinutes: 0 }));
     const result = await useCase.execute("p1");
     expect(result).toEqual({
       human: 1508,
       ai: 0,
       total: 1508,
       minutes: 2010,
+      waitMinutes: 0,
       estimateHours: null,
       projectRate: null,
       estimatedCost: null,
@@ -61,7 +62,7 @@ describe("ProjectCostBreakdownUseCase", () => {
 
   it("computes estimatedCost, revenue and margin against the total cost", async () => {
     const useCase = new ProjectCostBreakdownUseCase(
-      new FakeAgg({ human: 1000, ai: 0, minutes: 6000 }, { estimateHours: 120, ratePerHour: 80 }),
+      new FakeAgg({ human: 1000, ai: 0, minutes: 6000, waitMinutes: 0 }, { estimateHours: 120, ratePerHour: 80 }),
     );
     const result = await useCase.execute("p1");
     expect(result.estimateHours).toBe(120);
@@ -74,7 +75,7 @@ describe("ProjectCostBreakdownUseCase", () => {
 
   it("includes AI cost in the total and subtracts it from the margin", async () => {
     const useCase = new ProjectCostBreakdownUseCase(
-      new FakeAgg({ human: 1000, ai: 250.5, minutes: 6000 }, { estimateHours: null, ratePerHour: 80 }),
+      new FakeAgg({ human: 1000, ai: 250.5, minutes: 6000, waitMinutes: 0 }, { estimateHours: null, ratePerHour: 80 }),
     );
     const result = await useCase.execute("p1");
     expect(result.human).toBe(1000);
@@ -86,7 +87,7 @@ describe("ProjectCostBreakdownUseCase", () => {
 
   it("leaves estimatedCost null when estimateHours is missing but still computes revenue", async () => {
     const useCase = new ProjectCostBreakdownUseCase(
-      new FakeAgg({ human: 500, ai: 0, minutes: 3000 }, { estimateHours: null, ratePerHour: 60 }),
+      new FakeAgg({ human: 500, ai: 0, minutes: 3000, waitMinutes: 0 }, { estimateHours: null, ratePerHour: 60 }),
     );
     const result = await useCase.execute("p1");
     expect(result.estimatedCost).toBeNull();
@@ -97,7 +98,7 @@ describe("ProjectCostBreakdownUseCase", () => {
 
   it("returns marginPerHour null when there are no tracked hours", async () => {
     const useCase = new ProjectCostBreakdownUseCase(
-      new FakeAgg({ human: 0, ai: 0, minutes: 0 }, { estimateHours: 10, ratePerHour: 90 }),
+      new FakeAgg({ human: 0, ai: 0, minutes: 0, waitMinutes: 0 }, { estimateHours: 10, ratePerHour: 90 }),
     );
     const result = await useCase.execute("p1");
     expect(result.revenue).toBe(0);

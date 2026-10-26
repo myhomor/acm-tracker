@@ -30,7 +30,9 @@ export function Tracker() {
             { label: t("cabina.billable"), value: today ? hm(today.billableMinutes) : "—", accent: colors.green },
             { label: t("tracker.tileCostoLabel"), value: today ? `$${today.cost}` : "—" },
             { label: t("tracker.tileIaLabel"), value: today ? `$${today.aiCost}` : "—", accent: colors.blue },
+            { label: t("tracker.tileWaitLabel"), value: today ? hm(today.waitMinutes) : "—", accent: colors.amber },
           ]}
+          columns={5}
         />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16, alignItems: "start" }}>

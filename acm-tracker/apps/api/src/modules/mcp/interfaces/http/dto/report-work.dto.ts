@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsArray, IsInt, IsOptional, IsString, Min, ValidateNested } from "class-validator";
+import { IsArray, IsISO8601, IsInt, IsOptional, IsString, Min, ValidateNested } from "class-validator";
 
 class AiRunDto {
   @IsString() model!: string;
@@ -13,6 +13,7 @@ export class ReportWorkDto {
   @IsString() memberEmail!: string;
   @IsInt() @Min(0) minutes!: number;
   @IsString() @IsOptional() output?: string;
+  @IsISO8601() @IsOptional() startedAt?: string;
   @IsArray() @ValidateNested({ each: true }) @Type(() => AiRunDto) @IsOptional() aiRuns?: AiRunDto[];
 }
 

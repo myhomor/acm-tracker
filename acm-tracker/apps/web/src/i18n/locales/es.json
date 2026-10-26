@@ -103,7 +103,9 @@
         "done": "terminada"
       },
       "emptyTasks": "Sin tareas aún.",
-      "backLink": "← Proyectos"
+      "backLink": "← Proyectos",
+      "waited": "esperó {{time}}",
+      "waitLabel": "ESPERA"
     },
     "tabs": {
       "resumen": "Resumen",
@@ -170,9 +172,11 @@
     "colHuman": "Humano",
     "colAgent": "Agente",
     "colWait": "Espera",
-    "colTotal": "Total",
+    "colTotal": "Trabajado",
     "colTimeCost": "Tiempo $",
-    "dailyEmpty": "Sin entradas en los últimos 30 días."
+    "dailyEmpty": "Sin entradas en los últimos 30 días.",
+    "tileWaitLabel": "Esperando respuesta",
+    "tileWaitSub": "no cuenta en horas"
   },
   "tracker": {
     "breadcrumb": "/ tiempo · hoy",
@@ -208,8 +212,9 @@
       "timer": "humano · timer",
       "mcp": "auto · mcp"
     },
-    "yesterdayPanel": "Ayer · {{date}} · {{time}} · tiempo ${{cost}} · IA ${{ai}}",
-    "emptyYesterday": "Sin entradas ayer."
+    "yesterdayPanel": "Ayer · {{date}} · trabajado {{time}} · espera {{wait}} · tiempo ${{cost}} · IA ${{ai}}",
+    "emptyYesterday": "Sin entradas ayer.",
+    "tileWaitLabel": "Esperando respuesta"
   },
   "documents": {
     "breadcrumb": "/ documentos",

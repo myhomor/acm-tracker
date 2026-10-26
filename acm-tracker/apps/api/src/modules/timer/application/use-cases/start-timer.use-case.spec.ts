@@ -34,6 +34,7 @@ class FakeEntries implements TimeEntryRepositoryPort {
     };
   }
   async findByTask(): Promise<TimeEntry[]> { return []; }
+  async waitingMemberIds(): Promise<string[]> { return []; }
   async findByProject(): Promise<ProjectEntryView[]> { return []; }
   async findToday(): Promise<TodayEntryView[]> { return []; }
 }

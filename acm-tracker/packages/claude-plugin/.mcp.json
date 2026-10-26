@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "acm-tracker": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/index.js"],
+      "env": {
+        "ACM_API_URL": "${ACM_API_URL}",
+        "ACM_OWNER_EMAIL": "${ACM_OWNER_EMAIL}"
+      }
+    }
+  }
+}

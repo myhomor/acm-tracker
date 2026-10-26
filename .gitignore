@@ -4,7 +4,7 @@
 
 # Локальные настройки с личными путями и данными — в репозитории лежат *.example-версии
 .env
-.mcp.json
+/.mcp.json
 .claude/settings.local.json
 /hooks/config.json
 

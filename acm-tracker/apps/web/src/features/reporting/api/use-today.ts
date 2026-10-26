@@ -7,6 +7,7 @@ export interface TodaySummary {
   cost: number;
   aiCost: number;
   weekMinutes: number;
+  waitMinutes: number;
 }
 
 export interface MarginSummary {

@@ -70,6 +70,7 @@ export interface CostBreakdown {
 export interface PersonCost {
   memberId: string;
   name: string;
+  kind: "agent" | "wait" | "human";
   minutes: number;
   human: number;
   ai: number;

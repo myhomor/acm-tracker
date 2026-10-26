@@ -6,6 +6,7 @@ import { Panel } from "../components/Panel";
 import { Avatar } from "../components/Avatar";
 import { DataTable } from "../components/DataTable";
 import { Tag } from "../components/Tag";
+import { formatMinutes } from "../lib/format-minutes";
 import { useProject } from "../features/projects/api/use-projects";
 import { useTasks, useCreateTask } from "../features/tasks/api/use-tasks";
 import { useProjectCost } from "../features/reporting/api/use-reporting";
@@ -100,6 +101,10 @@ export function ProjectDetail() {
             <div>
               <div className="mono" style={{ fontSize: 10, color: colors.muted, letterSpacing: 1 }}>{t("projects.detail.hoursLabel")}</div>
               <div className="mono" style={{ fontSize: 22, fontWeight: 700 }}>{cost ? Math.floor(cost.minutes / 60) : 0}h</div>
+            </div>
+            <div>
+              <div className="mono" style={{ fontSize: 10, color: colors.muted, letterSpacing: 1 }}>{t("projects.detail.waitLabel")}</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: colors.amber }}>{cost ? formatMinutes(cost.waitMinutes) : "—"}</div>
             </div>
           </div>
         </Panel>

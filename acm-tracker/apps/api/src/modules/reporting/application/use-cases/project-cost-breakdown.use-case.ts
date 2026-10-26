@@ -9,6 +9,7 @@ export interface ProjectCostBreakdown {
   ai: number;
   total: number;
   minutes: number;
+  waitMinutes: number;
   estimateHours: number | null;
   projectRate: number | null;
   estimatedCost: number | null;
@@ -40,6 +41,7 @@ export class ProjectCostBreakdownUseCase {
     return {
       ...breakdown,
       minutes: row.minutes,
+      waitMinutes: row.waitMinutes,
       estimateHours,
       projectRate: ratePerHour,
       estimatedCost,
